@@ -11,7 +11,7 @@
 # Lade Module oder aktiviere Umgebung
 #source ~/.bashrc
 #conda activate bev_clr_ad
-
+#test
 # Training starten
 export OMP_NUM_THREADS=16
 export CUDA_VISIBLE_DEVICES=0

@@ -7,15 +7,15 @@ log_freq: 100
 shuffle: true
 dset: 'trainval'
 save_freq: 1000
-batch_size: 1
+batch_size: 2
 grad_acc: 5
 lr: 0.0003
 use_scheduler: true
 weight_decay: 0.0000001
-nworkers: 4
+nworkers: 8
 
 # Directories
-data_dir: '/datasets/nuscenes'
+data_dir: '/../../../../../../beegfs/scratch/workspace/es_luheit04-NuSceneDataset/nuscenes'
 custom_dataroot: 'datasets/scaled_images'
 log_dir: 'logs_nuscenes'
 ckpt_dir: 'model_checkpoints'

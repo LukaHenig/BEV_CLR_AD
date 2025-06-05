@@ -10,7 +10,7 @@ nworkers: 8
 do_drn_val_split: true
 
 # Directories
-data_dir: '/datasets/nuscenes'
+data_dir: '/../../../../../../beegfs/scratch/workspace/es_luheit04-NuSceneDataset/nuscenes'
 custom_dataroot: 'datasets/scaled_images'
 log_dir: 'logs_nuscenes'
 init_dir: 'model_checkpoints/BEVCar'

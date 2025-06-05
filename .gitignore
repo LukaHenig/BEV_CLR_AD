@@ -1,0 +1,11 @@
+# TensorBoard Events Dateien
+events.out.tfevents.*
+
+# Trainings-Output-Dateien
+*.out
+
+# Checkpoints / Modelle
+*.pth
+
+# WandB Logs und Ordner
+wandb/

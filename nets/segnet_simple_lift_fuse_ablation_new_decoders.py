@@ -606,7 +606,7 @@ class SegnetSimpleLiftFuse(nn.Module):
         if self.use_multi_scale_img_feats:
 
             if self.encoder_type == 'dino_v2':
-                # we need to get the feature space down to 128 ---> do we loose too much information?
+                # we need to get the feature space down to 128 ---> do we lose too much information?
                 # use convolutions for that
                 img_encoder_feats, dino_out = self.encoder(rgb_camXs_)
                 if self.compress_adapter_output:

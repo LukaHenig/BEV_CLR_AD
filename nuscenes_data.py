@@ -13,7 +13,7 @@ import torch
 import torchvision
 from nuscenes.map_expansion.map_api import NuScenesMap
 from nuscenes.nuscenes import NuScenes
-from nuscenes.utils.data_classes import Box, PointCloud, RadarPointCloud
+from nuscenes.utils.data_classes import Box, PointCloud, RadarPointCloud, LidarPointCloud
 from nuscenes.utils.geometry_utils import transform_matrix
 from nuscenes.utils.splits import create_splits_scenes
 from PIL import Image
@@ -106,6 +106,49 @@ def get_radar_data(nusc, sample_rec, nsweeps, min_distance, use_radar_filters, d
                 break
             else:
                 current_sd_rec = nusc.get('sample_data', current_sd_rec['prev'])
+
+    return points
+
+
+def get_lidar_data(nusc, sample_rec, nsweeps, dataroot):
+    """Returns at most nsweeps of lidar in the ego frame."""
+    points = np.zeros((5, 0))  # 4 lidar features plus one for time
+
+    ref_sd_token = sample_rec['data']['LIDAR_TOP']
+    current_sd_rec = nusc.get('sample_data', ref_sd_token)
+    ref_pose_rec = nusc.get('ego_pose', current_sd_rec['ego_pose_token'])
+    ref_cs_rec = nusc.get('calibrated_sensor', current_sd_rec['calibrated_sensor_token'])
+    ref_time = 1e-6 * current_sd_rec['timestamp']
+
+    car_from_global = transform_matrix(ref_pose_rec['translation'],
+                                        Quaternion(ref_pose_rec['rotation']),
+                                        inverse=True)
+
+    for _ in range(nsweeps):
+        current_pc = LidarPointCloud.from_file(os.path.join(dataroot, current_sd_rec['filename']))
+
+        current_pose_rec = nusc.get('ego_pose', current_sd_rec['ego_pose_token'])
+        global_from_car = transform_matrix(current_pose_rec['translation'],
+                                           Quaternion(current_pose_rec['rotation']),
+                                           inverse=False)
+
+        current_cs_rec = nusc.get('calibrated_sensor', current_sd_rec['calibrated_sensor_token'])
+        car_from_current = transform_matrix(current_cs_rec['translation'],
+                                            Quaternion(current_cs_rec['rotation']),
+                                            inverse=False)
+
+        trans_matrix = reduce(np.dot, [car_from_global, global_from_car, car_from_current])
+        current_pc.transform(trans_matrix)
+
+        time_lag = ref_time - 1e-6 * current_sd_rec['timestamp']
+        times = time_lag * np.ones((1, current_pc.nbr_points()))
+        new_points = np.concatenate((current_pc.points, times), 0)
+        points = np.concatenate((points, new_points), 1)
+
+        if current_sd_rec['prev'] == '':
+            break
+        else:
+            current_sd_rec = nusc.get('sample_data', current_sd_rec['prev'])
 
     return points
 
@@ -476,7 +519,8 @@ class NuscData(torch.utils.data.Dataset):
                  use_shallow_metadata: bool = True, use_pre_scaled_imgs: bool = True, custom_dataroot: str = None,
                  use_obj_layer_only_on_map: bool = False, vis_full_scenes: bool = False,
                  use_radar_occupancy_map: bool = False, do_drn_val_split: bool = False, get_val_day: bool = False,
-                 get_val_rain: bool = False, get_val_night: bool = False, print_details: bool = False):
+                 get_val_rain: bool = False, get_val_night: bool = False, print_details: bool = False,
+                 use_lidar: bool = False, lidar_nsweeps: int = 1):
         self.nusc = nusc
         self.nusc_maps = nusc_maps
         self.is_train = is_train
@@ -524,6 +568,9 @@ class NuscData(torch.utils.data.Dataset):
         self.custom_dataroot = custom_dataroot
 
         self.use_obj_layer_only_on_map = use_obj_layer_only_on_map
+
+        self.use_lidar = use_lidar
+        self.lidar_nsweeps = lidar_nsweeps
 
         XMIN, XMAX, YMIN, YMAX, ZMIN, ZMAX = self.bounds
         Z, Y, X = self.res_3d
@@ -811,6 +858,10 @@ class NuscData(torch.utils.data.Dataset):
                              use_radar_filters=self.use_radar_filters, dataroot=self.dataroot)
         return torch.Tensor(pts)
 
+    def get_lidar_data(self, rec, nsweeps):
+        pts = get_lidar_data(self.nusc, rec, nsweeps=nsweeps, dataroot=self.dataroot)
+        return torch.Tensor(pts)
+
     def get_binimg(self, rec):
         egopose = self.nusc.get('ego_pose', self.nusc.get('sample_data', rec['data']['LIDAR_TOP'])['ego_pose_token'])
         trans = -np.array(egopose['translation'])
@@ -1009,6 +1060,9 @@ class VizData(NuscData):
 
         # radar data handling
         radar_data = self.get_radar_data(rec, nsweeps=self.nsweeps)
+        lidar_data = None
+        if self.use_lidar:
+            lidar_data = self.get_lidar_data(rec, nsweeps=self.lidar_nsweeps)
 
         lrtlist_, boxlist_, vislist_, tidlist_ = self.get_lrtlist(rec)
         N_ = lrtlist_.shape[0]
@@ -1083,10 +1137,10 @@ class VizData(NuscData):
                 number_of_occupied_voxels = number_of_occupied_voxels.squeeze(dim=0)
 
                 return imgs, rots, trans, intrins, seg_bev, valid_bev, \
-                    radar_data, bev_map_mask, bev_map, \
+                    radar_data, lidar_data, bev_map_mask, bev_map, \
                     egocar_bev_tensor, voxel_input_feature_buffer, voxel_coordinate_buffer, number_of_occupied_voxels
         else:
-            return imgs, rots, trans, intrins, seg_bev, valid_bev, radar_data, \
+            return imgs, rots, trans, intrins, seg_bev, valid_bev, radar_data, lidar_data, \
                 bev_map_mask, bev_map, egocar_bev_tensor
 
     def __getitem__(self, index):
@@ -1108,6 +1162,7 @@ class VizData(NuscData):
         all_seg_bev = []
         all_valid_bev = []
         all_radar_data = []
+        all_lidar_data = []
         # added bev_map_gt
         all_bev_map_mask = []
         all_bev_map = []
@@ -1127,7 +1182,7 @@ class VizData(NuscData):
         for index_t in samples:
             if self.radar_encoder_type == "voxel_net":
                 # voxelnet
-                imgs, rots, trans, intrins, seg_bev, valid_bev, radar_data, \
+                imgs, rots, trans, intrins, seg_bev, valid_bev, radar_data, lidar_data, \
                     bev_map_mask, bev_map, egocar_bev_tensor, voxel_input_feature_buffer, \
                     voxel_coordinate_buffer, number_of_occupied_voxels = \
                     self.get_single_item(index_t, cams, refcam_id=refcam_id)
@@ -1138,7 +1193,7 @@ class VizData(NuscData):
 
             else:
                 # default
-                imgs, rots, trans, intrins, seg_bev, valid_bev, radar_data, \
+                imgs, rots, trans, intrins, seg_bev, valid_bev, radar_data, lidar_data, \
                     bev_map_mask, bev_map, egocar_bev_tensor = \
                     self.get_single_item(index_t, cams, refcam_id=refcam_id)
 
@@ -1149,6 +1204,7 @@ class VizData(NuscData):
             all_seg_bev.append(seg_bev)
             all_valid_bev.append(valid_bev)
             all_radar_data.append(radar_data)
+            all_lidar_data.append(lidar_data)
             # added bev_map_gt
             all_bev_map_mask.append(bev_map_mask)
             all_bev_map.append(bev_map)
@@ -1162,6 +1218,7 @@ class VizData(NuscData):
         all_seg_bev = torch.stack(all_seg_bev)
         all_valid_bev = torch.stack(all_valid_bev)
         all_radar_data = torch.stack(all_radar_data)
+        all_lidar_data = torch.stack(all_lidar_data)
         # added bev_map_gt
         all_bev_map_mask = torch.stack(all_bev_map_mask)
         all_bev_map = torch.stack(all_bev_map)
@@ -1175,12 +1232,12 @@ class VizData(NuscData):
             all_number_of_occupied_voxels = torch.stack(all_number_of_occupied_voxels)
 
             return all_imgs, all_rots, all_trans, all_intrins, \
-                all_seg_bev, all_valid_bev, all_radar_data, \
+                all_seg_bev, all_valid_bev, all_radar_data, all_lidar_data, \
                 all_bev_map_mask, all_bev_map, all_egocar_bev_tensors, all_voxel_input_feature_buffer, \
                 all_voxel_coordinate_buffer, all_number_of_occupied_voxels
         else:
             return all_imgs, all_rots, all_trans, all_intrins, \
-                all_seg_bev, all_valid_bev, all_radar_data, \
+                all_seg_bev, all_valid_bev, all_radar_data, all_lidar_data, \
                 all_bev_map_mask, all_bev_map, all_egocar_bev_tensors
 
 
@@ -1202,7 +1259,7 @@ def compile_data(version, dataroot, data_aug_conf, centroid, bounds, res_3d, bsz
                  do_shuffle_cams=True, distributed_sampler=False, rank=None, use_pre_scaled_imgs=True,
                  custom_dataroot=None, use_obj_layer_only_on_map=False, vis_full_scenes=False,
                  use_radar_occupancy_map=False, do_drn_val_split=False, get_val_day=False, get_val_rain=False,
-                 get_val_night=False):
+                 get_val_night=False, use_lidar=False, lidar_nsweeps=1):
 
     print_details = False
     if rank == 0 or rank is None:
@@ -1237,6 +1294,8 @@ def compile_data(version, dataroot, data_aug_conf, centroid, bounds, res_3d, bsz
         use_obj_layer_only_on_map=use_obj_layer_only_on_map,
         vis_full_scenes=vis_full_scenes,
         use_radar_occupancy_map=use_radar_occupancy_map,
+        use_lidar=use_lidar,
+        lidar_nsweeps=lidar_nsweeps,
         print_details=print_details
     )
     valdata = VizData(
@@ -1261,6 +1320,8 @@ def compile_data(version, dataroot, data_aug_conf, centroid, bounds, res_3d, bsz
         use_obj_layer_only_on_map=use_obj_layer_only_on_map,
         vis_full_scenes=vis_full_scenes,
         use_radar_occupancy_map=use_radar_occupancy_map,
+        use_lidar=use_lidar,
+        lidar_nsweeps=lidar_nsweeps,
         do_drn_val_split=do_drn_val_split,
         get_val_day=get_val_day,
         get_val_rain=get_val_rain,

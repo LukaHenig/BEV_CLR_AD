@@ -396,11 +396,15 @@ class SegnetSimpleLiftFuse(nn.Module):
                  compress_adapter_output=True,
                  use_rpn_radar=False,
                  use_radar_occupancy_map=False,
+                 use_lidar=False,
+                 use_lidar_encoder=False,
+                 lidar_encoder_type="voxel_net",
                  freeze_dino=True,
                  is_master=False):
         super(SegnetSimpleLiftFuse, self).__init__()
         assert (encoder_type in ["res101", "res50", "dino_v2", "vit_s"])
         assert (radar_encoder_type in ["voxel_net", None])
+        assert (lidar_encoder_type in ["voxel_net", None])
         assert (train_task in ["object", "map", "both"])
 
         self.Z_cam, self.Y_cam, self.X_cam = Z_cam, Y_cam, X_cam  # Z=100, Y=4, X=100
@@ -425,6 +429,9 @@ class SegnetSimpleLiftFuse(nn.Module):
         self.use_radar_only_init = False
         self.use_rpn_radar = use_rpn_radar
         self.use_radar_occupancy_map = use_radar_occupancy_map
+        self.use_lidar = use_lidar
+        self.use_lidar_encoder = use_lidar_encoder
+        self.lidar_encoder_type = lidar_encoder_type
         self.freeze_dino = freeze_dino
         self.is_master = is_master
 
@@ -487,13 +494,25 @@ class SegnetSimpleLiftFuse(nn.Module):
         else:
             print("#############    CAM ONLY    ##############")
 
+        if self.use_lidar_encoder and self.use_lidar:
+            if self.lidar_encoder_type == "voxel_net":
+                self.lidar_encoder = VoxelNet(use_col=False, reduced_zx=False,
+                                             output_dim=latent_dim,
+                                             use_radar_occupancy_map=False)
+            else:
+                print("Lidar encoder not found ")
+
         # SimpleBEV based Lifting and Fusion module
         if is_master:
             print("Transformer initialized")
 
+        in_ch = feat2d_dim * Y_cam
+        if self.use_radar:
+            in_ch += feat2d_dim
+        if self.use_lidar:
+            in_ch += feat2d_dim
         self.bev_compressor = nn.Sequential(
-            # Y = 8 --> vertical dimension extends the channel dimension
-            nn.Conv2d(feat2d_dim * Y_cam + feat2d_dim, feat2d_dim, kernel_size=3, padding=1, stride=1, bias=False),
+            nn.Conv2d(in_ch, feat2d_dim, kernel_size=3, padding=1, stride=1, bias=False),
             nn.InstanceNorm2d(latent_dim),
             nn.GELU(),
         )
@@ -557,7 +576,7 @@ class SegnetSimpleLiftFuse(nn.Module):
         else:
             self.xyz_camA = None
 
-    def forward(self, rgb_camXs, pix_T_cams, cam0_T_camXs, vox_util, rad_occ_mem0=None):
+    def forward(self, rgb_camXs, pix_T_cams, cam0_T_camXs, vox_util, rad_occ_mem0=None, lidar_occ_mem0=None):
         """
         B = batch size, S = number of cameras, C = 3, H = img height, W = img width
         rgb_camXs: (B,S,C,H,W)
@@ -568,6 +587,9 @@ class SegnetSimpleLiftFuse(nn.Module):
             - None when use_radar = False
             - (B, 1, Z, Y, X) when use_radar = True, use_metaradar = False
             - (B, 16, Z, Y, X) when use_radar = True, use_metaradar = True
+        lidar_occ_mem0:
+            - None when use_lidar = False
+            - (B, 1, Z, Y, X) when use_lidar = True
         """
         B, S, C, H, W = rgb_camXs.shape
         assert (C == 3)
@@ -710,8 +732,20 @@ class SegnetSimpleLiftFuse(nn.Module):
             else:
                 rad_bev_ = rad_occ_mem0.permute(0, 1, 3, 2, 4).reshape(B, 16 * Y_rad, Z_rad, X_rad)  # C=128
 
-        # Fusion:
-        feat_bev_ = torch.cat([cam_feat_bev, rad_bev_], dim=1)  # B,C,200,200
+        lid_bev_ = None
+        if self.use_lidar:
+            assert (lidar_occ_mem0 is not None)
+            lid_bev_ = lidar_occ_mem0.permute(0, 1, 3, 2, 4).reshape(B, lidar_occ_mem0.shape[1]*self.Y_rad, self.Z_rad, self.X_rad)
+            if lid_bev_.shape[1] != self.latent_dim:
+                zero_padding = torch.zeros((B, self.latent_dim - lid_bev_.shape[1], self.Z_rad, self.X_rad)).to(device)
+                lid_bev_ = torch.cat((lid_bev_, zero_padding), dim=1)
+
+        feat_list = [cam_feat_bev]
+        if self.use_radar:
+            feat_list.append(rad_bev_)
+        if self.use_lidar:
+            feat_list.append(lid_bev_)
+        feat_bev_ = torch.cat(feat_list, dim=1)
 
         if self.rand_flip:
             self.bev_flip1_index = np.random.choice([0, 1], B).astype(bool)
@@ -722,6 +756,9 @@ class SegnetSimpleLiftFuse(nn.Module):
             if rad_occ_mem0 is not None and not (self.radar_encoder_type == "voxel_net"):
                 rad_occ_mem0[self.bev_flip1_index] = torch.flip(rad_occ_mem0[self.bev_flip1_index], [-1])
                 rad_occ_mem0[self.bev_flip2_index] = torch.flip(rad_occ_mem0[self.bev_flip2_index], [-3])
+            if lidar_occ_mem0 is not None:
+                lidar_occ_mem0[self.bev_flip1_index] = torch.flip(lidar_occ_mem0[self.bev_flip1_index], [-1])
+                lidar_occ_mem0[self.bev_flip2_index] = torch.flip(lidar_occ_mem0[self.bev_flip2_index], [-3])
 
         feat_bev_ = self.bev_compressor(feat_bev_)
 

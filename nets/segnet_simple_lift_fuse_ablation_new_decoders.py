@@ -360,7 +360,7 @@ class DinoMulti2SingleScale(nn.Module):
         self.single_scale_compress = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
             nn.InstanceNorm2d(out_channels),
-            nn.GELU(),  # ReLU throws backprob. error maybe due to "dying ReLU" problem !!!
+            nn.GELU(),  # ReLU throws backprop error maybe due to 'dying ReLU' problem
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),
             nn.InstanceNorm2d(out_channels),
             nn.GELU(),

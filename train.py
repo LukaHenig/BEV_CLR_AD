@@ -921,6 +921,7 @@ def main(
         rand_crop_and_resize=True,
         ncams=6,
         nsweeps=5,
+        lidar_nsweeps=5,
         # model
         encoder_type='dino_v2',
         radar_encoder_type='voxel_net',
@@ -1027,6 +1028,7 @@ def main(
         "rand_crop_and_resize": rand_crop_and_resize,
         "ncams": ncams,
         "nsweeps": nsweeps,
+        "lidar_nsweeps": lidar_nsweeps,
         # model
         "encoder_type": encoder_type,
         "radar_encoder_type": radar_encoder_type,
@@ -1090,7 +1092,7 @@ def main(
         use_obj_layer_only_on_map=use_obj_layer_only_on_map,
         use_radar_occupancy_map=use_radar_occupancy_map,
         use_lidar=use_lidar,
-        lidar_nsweeps=nsweeps,
+        lidar_nsweeps=lidar_nsweeps,
     )
     train_iterloader = iter(train_dataloader)
 

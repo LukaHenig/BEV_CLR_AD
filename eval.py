@@ -650,6 +650,7 @@ def main(
         final_dim=[448, 896],  # to match //8, //14, //16 and //32 in Vit
         ncams=6,
         nsweeps=5,
+        lidar_nsweeps=5,
         # model
         encoder_type='dino_v2',
         radar_encoder_type='voxel_net',
@@ -722,7 +723,7 @@ def main(
         use_obj_layer_only_on_map=use_obj_layer_only_on_map,
         use_radar_occupancy_map=use_radar_occupancy_map,
         use_lidar=use_lidar,
-        lidar_nsweeps=nsweeps,
+        lidar_nsweeps=lidar_nsweeps,
         do_drn_val_split=do_drn_val_split,
         get_val_day=False,  # set 'True' for debug only
         get_val_rain=False,  # set 'True' for debug only

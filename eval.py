@@ -1,6 +1,8 @@
+# imports
 import argparse
 import os
 import random
+import inspect
 # os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 # print("FIXED CUDA DEVICE: " + os.environ['CUDA_VISIBLE_DEVICES'])
 import time
@@ -368,6 +370,8 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device='cuda:0', sw=None, use_
     seg_bev_g = seg_bev_g[:, 0]
     valid_bev_g = valid_bev_g[:, 0]
     radar_data = radar_data[:, 0]
+    if lidar_data is not None:
+        lidar_data = lidar_data[:, 0]
     # added bev_map_gt
     bev_map_mask_g = bev_map_mask_g[:, 0]
     if use_obj_layer_only_on_map:
@@ -465,13 +469,23 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device='cuda:0', sw=None, use_
         lid_occ_mem0 = vox_util.voxelize_xyz(xyz_lid, Z, Y, X, assert_cube=False)
 
     start_inference_t = time.time()  # optional: pure inference timing
-    seg_e = model(
-        rgb_camXs=rgb_camXs,
-        pix_T_cams=pix_T_cams,
-        cam0_T_camXs=cam0_T_camXs,
-        vox_util=vox_util,
-        rad_occ_mem0=in_occ_mem0,
-        lidar_occ_mem0=lid_occ_mem0)
+    module = model.module if hasattr(model, "module") else model
+    forward_params = inspect.signature(module.forward).parameters
+    if "lidar_occ_mem0" in forward_params:
+        seg_e = model(
+            rgb_camXs=rgb_camXs,
+            pix_T_cams=pix_T_cams,
+            cam0_T_camXs=cam0_T_camXs,
+            vox_util=vox_util,
+            rad_occ_mem0=in_occ_mem0,
+            lidar_occ_mem0=lid_occ_mem0)
+    else:
+        seg_e = model(
+            rgb_camXs=rgb_camXs,
+            pix_T_cams=pix_T_cams,
+            cam0_T_camXs=cam0_T_camXs,
+            vox_util=vox_util,
+            rad_occ_mem0=in_occ_mem0)
     inference_t = time.time() - start_inference_t  # optional: pure inference timing
     # print("Inference time: ", inference_t)  # optional: pure inference timing
 

@@ -481,7 +481,7 @@ def reduce_loss_metrics(total_loss: torch.Tensor, metrics: dict, train_task: str
 
 def run_model(model, loss_fn, map_seg_loss_fn, d, device, sw=None, use_radar_encoder=None,
               radar_encoder_type=None, train_task='both', is_master=False, use_shallow_metadata=True,
-              use_obj_layer_only_on_map=False):
+              use_obj_layer_only_on_map=False, use_lidar=False):
     metrics = {}
     total_loss = torch.tensor(0.0, requires_grad=True).to(device)
 
@@ -489,6 +489,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device, sw=None, use_radar_enc
     voxel_coordinate_buffer = None
     number_of_occupied_voxels = None
     in_occ_mem0 = None
+    lid_occ_mem0 = None
 
     if radar_encoder_type == "voxel_net":
         # voxelnet
@@ -719,6 +720,11 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device, sw=None, use_radar_enc
             rad_occ_mem0_wandb = rad_occ_mem0_wandb.squeeze().permute(1, 2, 0).numpy()
             rad_occ_mem0_wandb = wandb.Image(rad_occ_mem0_wandb)
             wandb.log({'train/inputs/rad_occ_mem0': rad_occ_mem0_wandb}, commit=False)
+
+        if use_lidar and lid_occ_mem0 is not None:
+            lid_occ_vis = sw.summ_occ('0_inputs/lid_occ_mem0', lid_occ_mem0)
+            lid_occ_vis = lid_occ_vis.squeeze().permute(1, 2, 0).numpy()
+            wandb.log({'train/inputs/lid_occ_mem0': wandb.Image(lid_occ_vis)}, commit=False)
 
         rgb_input = sw.summ_rgb('0_inputs/rgb_camXs', torch.cat(rgb_camXs[0:1].unbind(1), dim=-1))  # 1,1,3,448,4800
         rgb_input = rgb_input.squeeze().permute(1, 2, 0).numpy()  # 448,4800,3

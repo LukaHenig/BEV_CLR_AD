@@ -23,6 +23,7 @@ import utils.geom
 import utils.improc
 import utils.misc
 import utils.vox
+import wandb
 from nets.segnet_simple_bev_with_map import SegnetWithMap
 from nets.segnet_simple_lift_fuse_ablation_new_decoders import (
     SegnetSimpleLiftFuse,
@@ -747,6 +748,8 @@ def run_model(loader, index, model, loss_fn, map_seg_loss_fn, d, img_dir, device
             radar_t_vis = np.flip(radar_t_vis, axis=0)
             radar_t_vis_name = os.path.join(folder_name, "radar_%03d.png" % t)
             imageio.imwrite(radar_t_vis_name, radar_t_vis.astype(np.uint8))
+            radar_img = wandb.Image(radar_t_vis)
+            wandb.log({'eval/radar_vis': radar_img}, commit=False)
 
         total_scene_loss += total_loss
 

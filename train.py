@@ -2,6 +2,7 @@
 import argparse
 import os
 import random
+import inspect
 # os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # may help for debugging
 # print("FIXED CUDA DEVICE: " + os.environ['CUDA_VISIBLE_DEVICES'])  # debug-only
 import time
@@ -589,13 +590,23 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device='cuda:0', sw=None, use_
     if use_lidar and xyz_lid is not None:
         lid_occ_mem0 = vox_util.voxelize_xyz(xyz_lid, Z, Y, X, assert_cube=False)
 
-    seg_e = model(
-        rgb_camXs=rgb_camXs,
-        pix_T_cams=pix_T_cams,
-        cam0_T_camXs=cam0_T_camXs,
-        vox_util=vox_util,
-        rad_occ_mem0=in_occ_mem0,
-        lidar_occ_mem0=lid_occ_mem0)
+    module = model.module if hasattr(model, "module") else model
+    forward_params = inspect.signature(module.forward).parameters
+    if "lidar_occ_mem0" in forward_params:
+        seg_e = model(
+            rgb_camXs=rgb_camXs,
+            pix_T_cams=pix_T_cams,
+            cam0_T_camXs=cam0_T_camXs,
+            vox_util=vox_util,
+            rad_occ_mem0=in_occ_mem0,
+            lidar_occ_mem0=lid_occ_mem0)
+    else:
+        seg_e = model(
+            rgb_camXs=rgb_camXs,
+            pix_T_cams=pix_T_cams,
+            cam0_T_camXs=cam0_T_camXs,
+            vox_util=vox_util,
+            rad_occ_mem0=in_occ_mem0)
 
     # get bev map from masks
     if train_task == 'both' or train_task == 'map':
@@ -756,6 +767,11 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device='cuda:0', sw=None, use_
             rad_occ_mem0_wandb = rad_occ_mem0_wandb.squeeze().permute(1, 2, 0).numpy()
             rad_occ_mem0_wandb = wandb.Image(rad_occ_mem0_wandb)
             wandb.log({'train/inputs/rad_occ_mem0': rad_occ_mem0_wandb}, commit=False)
+
+        if use_lidar and lid_occ_mem0 is not None:
+            lid_occ_vis = sw.summ_occ('0_inputs/lid_occ_mem0', lid_occ_mem0)
+            lid_occ_vis = lid_occ_vis.squeeze().permute(1, 2, 0).numpy()
+            wandb.log({'train/inputs/lid_occ_mem0': wandb.Image(lid_occ_vis)}, commit=False)
 
         rgb_input = sw.summ_rgb('0_inputs/rgb_camXs', torch.cat(rgb_camXs[0:1].unbind(1), dim=-1))  # 1,1,3,448,4800
         rgb_input = rgb_input.squeeze().permute(1, 2, 0).numpy()  # 448,4800,3

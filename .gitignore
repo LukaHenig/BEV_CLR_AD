@@ -18,3 +18,6 @@ __pycache__/
 
 # Build directories
 nets/ops/build/
+
+# keys 
+ssh_key*

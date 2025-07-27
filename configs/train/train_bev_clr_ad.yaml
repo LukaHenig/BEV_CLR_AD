@@ -12,7 +12,7 @@ grad_acc: 5
 lr: 0.0003
 use_scheduler: true
 weight_decay: 0.0000001
-nworkers: 4
+nworkers: 8
 
 # Directories
 data_dir: '/../../../../../../beegfs/scratch/workspace/es_luheit04-NuSceneDataset/nuscenes'

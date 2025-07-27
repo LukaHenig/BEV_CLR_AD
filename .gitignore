@@ -9,3 +9,12 @@ events.out.tfevents.*
 
 # WandB Logs und Ordner
 wandb/
+# Python build artifacts
+__pycache__/
+*.pyc
+*.so
+*.o
+*.egg-info
+
+# Build directories
+nets/ops/build/

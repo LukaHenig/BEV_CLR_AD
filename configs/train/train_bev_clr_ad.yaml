@@ -1,5 +1,5 @@
 # model name
-exp_name: 'BEVCar'
+exp_name: 'BEV_CLR_AD'
 
 # Training parameters
 max_iters: 75000
@@ -40,6 +40,7 @@ radar_encoder_type: 'voxel_net'
 use_rpn_radar: false
 train_task: 'both'
 use_radar: true
+use_lidar: true
 use_radar_filters: false
 use_radar_encoder: true
 use_metaradar: false
@@ -58,12 +59,11 @@ do_feat_enc_dec: true
 combine_feat_init_w_learned_q: true
 model_type: 'transformer'
 use_radar_occupancy_map: false
-use_lidar: true
 learnable_fuse_query: true
 
 # wandb
-group: 'BEVCar'
-notes: 'BEVCar model: radar encoding, DINO as image backbone, fusion and lifting based on transformer,
-6 blocks, radar init, image init, multiscale feats, enc-dec, radar as query for fusion,
+group: 'BEV_CLR_AD'
+notes: 'BEV_CLR_AD model: radar encoding, LiDAR encoding, DINO as image backbone, fusion and lifting based on transformer,
+6 blocks, radar init, image init, multiscale feats, enc-dec, radar and LiDAR as query for fusion,
 with learnable queries'
 name: 'BEVCar'

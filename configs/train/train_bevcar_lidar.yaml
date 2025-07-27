@@ -7,7 +7,7 @@ log_freq: 100
 shuffle: true
 dset: 'trainval'
 save_freq: 1000
-batch_size: 2
+batch_size: 1
 grad_acc: 5
 lr: 0.0003
 use_scheduler: true
@@ -52,7 +52,7 @@ do_shuffle_cams: true
 use_multi_scale_img_feats: true
 num_layers: 6
 
-device_ids: [0,1,2,3,4,5,6,7]
+device_ids: [0]
 freeze_dino: true
 do_feat_enc_dec: true
 combine_feat_init_w_learned_q: true

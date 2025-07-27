@@ -904,7 +904,8 @@ def main(
                                           use_multi_scale_img_feats=use_multi_scale_img_feats, num_layers=num_layers,
                                           combine_feat_init_w_learned_q=combine_feat_init_w_learned_q,
                                           use_rpn_radar=use_rpn_radar, use_radar_occupancy_map=use_radar_occupancy_map,
-                                          freeze_dino=freeze_dino, learnable_fuse_query=learnable_fuse_query)
+                                          freeze_dino=freeze_dino, learnable_fuse_query=learnable_fuse_query,
+                                          use_lidar=use_lidar)
 
     elif model_type == 'simple_lift_fuse':
         # our net with replaced parameter-free lifting and concat-based fusion from SimpleBEV

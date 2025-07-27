@@ -1137,7 +1137,8 @@ def main(
                                           combine_feat_init_w_learned_q=combine_feat_init_w_learned_q,
                                           use_rpn_radar=use_rpn_radar, use_radar_occupancy_map=use_radar_occupancy_map,
                                           freeze_dino=freeze_dino, learnable_fuse_query=learnable_fuse_query,
-                                          is_master=is_master)
+                                          is_master=is_master,
+                                          use_lidar=use_lidar)
 
     elif model_type == 'simple_lift_fuse':
         # our net with replaced lifting and fusion from SimpleBEV

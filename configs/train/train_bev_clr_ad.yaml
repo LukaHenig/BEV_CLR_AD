@@ -2,7 +2,7 @@
 exp_name: 'BEV_CLR_AD'
 
 # Training parameters
-max_iters: 75000
+max_iters: 50000
 log_freq: 100
 shuffle: true
 dset: 'trainval'
@@ -12,7 +12,7 @@ grad_acc: 5
 lr: 0.0003
 use_scheduler: true
 weight_decay: 0.0000001
-nworkers: 8
+nworkers: 4
 
 # Directories
 data_dir: '/../../../../../../beegfs/scratch/workspace/es_luheit04-NuSceneDataset/nuscenes'
@@ -32,7 +32,7 @@ rand_flip: true
 rand_crop_and_resize: true
 ncams: 6
 nsweeps: 5
-lidar_nsweeps: 5
+lidar_nsweeps: 1
 
 # Model parameters
 encoder_type: 'dino_v2'

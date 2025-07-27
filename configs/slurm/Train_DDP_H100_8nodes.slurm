@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --partition=gpu8            # oder passender GPU-Partitionname
 #SBATCH --gres=gpu:h100:8
-#SBATCH --time=1:00:00
+#SBATCH --time=48:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=96                   # 1 Task pro GPU
 #SBATCH --mem=1400G

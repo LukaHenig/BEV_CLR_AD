@@ -15,7 +15,7 @@ weight_decay: 0.0000001
 nworkers: 8
 
 # Directories
-data_dir: '/../../../../../../beegfs/scratch/workspace/es_luheit04-NuSceneDataset/nuscenes'
+data_dir: '/../../../../../../beegfs/scratch/workspace/es_luheit04-NuScneDataset_new/es_luheit04-NuSceneDataset-1756172124/nuscenes'
 custom_dataroot: 'datasets/scaled_images'
 log_dir: 'logs_nuscenes'
 ckpt_dir: 'model_checkpoints'
@@ -40,7 +40,7 @@ radar_encoder_type: 'voxel_net'
 use_rpn_radar: false
 train_task: 'both'
 use_radar: true
-use_lidar: true
+use_lidar: true  #kann aktuell noch nicht auf false gesetzt werden 
 use_radar_filters: false
 use_radar_encoder: true
 use_metaradar: false

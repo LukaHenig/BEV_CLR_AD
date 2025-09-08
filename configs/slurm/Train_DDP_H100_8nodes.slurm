@@ -12,6 +12,10 @@
 #source ~/.bashrc
 #conda activate bev_clr_ad
 
+
+########### Irgendwie läuft es nicht mehr, muss man noch mal analysieren 
+
+
 # Training starten
 export OMP_NUM_THREADS=16
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7

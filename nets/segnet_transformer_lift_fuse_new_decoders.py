@@ -20,6 +20,9 @@ from nets.dino_v2_with_adapter.dino_v2_adapter.dinov2_adapter import (
 from nets.ops.modules import MSDeformAttn, MSDeformAttn3D
 from nets.voxelnet import VoxelNet
 
+torch.autograd.set_detect_anomaly(True)
+
+
 sys.path.append("..")
 EPS = 1e-4
 
@@ -760,7 +763,7 @@ class SegnetTransformerLiftFuse(nn.Module):
         if self.use_lidar:
             # compress LiDAR occupancy features to match latent_dim
             self.lidar_feats_compr = nn.Sequential(
-                nn.Conv2d(in_channels=1, out_channels=latent_dim, kernel_size=1, stride=1, bias=True),
+                nn.Conv2d(in_channels=8, out_channels=latent_dim, kernel_size=1, stride=1, bias=True),
                 nn.InstanceNorm2d(latent_dim),
                 nn.GELU(),
             )
@@ -1058,11 +1061,14 @@ class SegnetTransformerLiftFuse(nn.Module):
         if self.use_lidar:
             assert (lidar_occ_mem0 is not None)
             lid_bev_ = lidar_occ_mem0.permute(0, 1, 3, 2, 4).reshape(
-                B, lidar_occ_mem0.shape[1] * self.Y_rad, self.Z_rad, self.X_rad)
+            B, lidar_occ_mem0.shape[1] * self.Y_rad, self.Z_rad, self.X_rad
+            ).clone()  # ← hier clone einfügen
+
             lid_bev_ = self.lidar_feats_compr(lid_bev_)
 
+
         if self.use_radar and self.use_lidar:
-            rad_bev_ = rad_bev_ + lid_bev_
+            rad_bev_ = rad_bev_.clone() + lid_bev_
         elif self.use_lidar and not self.use_radar:
             rad_bev_ = lid_bev_
 

@@ -559,6 +559,10 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device='cuda:0', sw=None, use_
 
     cam0_T_camXs = utils.geom.get_camM_T_camXs(velo_T_cams, ind=0)
     rad_xyz_cam0 = utils.geom.apply_4x4(cams_T_velo[:, 0], xyz_rad)
+    if xyz_lid is not None:
+        lid_xyz_cam0 = utils.geom.apply_4x4(cams_T_velo[:, 0], xyz_lid)
+    else:
+        lid_xyz_cam0 = None
 
     # voxel object representing the memory for the (radar) data
     vox_util = utils.vox.Vox_util(
@@ -587,8 +591,8 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device='cuda:0', sw=None, use_
         assert False  # cannot use_metaradar without use_radar
 
     lid_occ_mem0 = None
-    if use_lidar and xyz_lid is not None:
-        lid_occ_mem0 = vox_util.voxelize_xyz(xyz_lid, Z, Y, X, assert_cube=False)
+    if use_lidar and lid_xyz_cam0 is not None:
+        lid_occ_mem0 = vox_util.voxelize_xyz(lid_xyz_cam0, Z, Y, X, assert_cube=False)
 
     module = model.module if hasattr(model, "module") else model
     forward_params = inspect.signature(module.forward).parameters

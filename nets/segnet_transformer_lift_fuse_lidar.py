@@ -661,12 +661,17 @@ class SegnetTransformerLiftFuse(nn.Module):
                  use_rpn_radar: bool = False,
                 use_radar_occupancy_map: bool = False,
                 use_lidar: bool = False,
+                use_lidar_encoder: bool = False,
+                lidar_encoder_type: str = "voxel_net",
+                use_rpn_lidar: bool = False,
+                use_lidar_occupancy_map: bool = False,
                 freeze_dino: bool = True,
                 learnable_fuse_query: bool = False,
                 is_master: bool = False):
         super(SegnetTransformerLiftFuse, self).__init__()
         assert (encoder_type in ["res101", "res50", "dino_v2", "vit_s"])
         assert (radar_encoder_type in ["voxel_net", None])
+        assert (lidar_encoder_type in ["voxel_net", None])
         assert (train_task in ["object", "map", "both"])
 
         self.Z_cam, self.Y_cam, self.X_cam = Z_cam, Y_cam, X_cam  # Z=200, Y=8, X=200
@@ -694,6 +699,10 @@ class SegnetTransformerLiftFuse(nn.Module):
         self.use_rpn_radar = use_rpn_radar
         self.use_radar_occupancy_map = use_radar_occupancy_map
         self.use_lidar = use_lidar
+        self.use_lidar_encoder = use_lidar_encoder
+        self.lidar_encoder_type = lidar_encoder_type
+        self.use_rpn_lidar = use_rpn_lidar
+        self.use_lidar_occupancy_map = use_lidar_occupancy_map
         self.freeze_dino = freeze_dino
         self.learnable_fuse_query = learnable_fuse_query
         self.is_master = is_master
@@ -760,13 +769,27 @@ class SegnetTransformerLiftFuse(nn.Module):
             if self.is_master:
                 print("#############    CAM ONLY    ##############")
 
-        if self.use_lidar:
-            # compress LiDAR occupancy features to match latent_dim
-            self.lidar_feats_compr = nn.Sequential(
-                nn.Conv2d(in_channels=8, out_channels=latent_dim, kernel_size=1, stride=1, bias=True),
-                nn.InstanceNorm2d(latent_dim),
-                nn.GELU(),
-            )
+        # LiDAR Encoder
+        if self.use_lidar_encoder and self.use_lidar:
+            if self.lidar_encoder_type == "voxel_net":
+                # if reduced_zx==True -> 100x100 instead of 200x200
+                self.lidar_encoder = VoxelNet(
+                    use_col=self.use_rpn_lidar,
+                    reduced_zx=False,
+                    output_dim=latent_dim,
+                    use_radar_occupancy_map=self.use_lidar_occupancy_map,
+                )
+            else:
+                print("LiDAR encoder not found ")
+        elif not self.use_lidar_encoder and self.use_lidar and self.is_master:
+            print("#############    NO LIDAR ENCODING    ##############")
+        else:
+            if self.is_master and not self.use_radar:
+                print("#############    CAM ONLY    ##############")
+
+        if self.use_radar and self.use_lidar:
+            # cross-attention module to fuse radar and LiDAR before camera fusion
+            self.radar_lidar_attention = FusingCrossAttentionV2(dim=latent_dim)
 
         # image BEV 3D feature volume compressor:
         if self.init_query_with_image_feats:
@@ -1060,17 +1083,32 @@ class SegnetTransformerLiftFuse(nn.Module):
         lid_bev_ = 0
         if self.use_lidar:
             assert (lidar_occ_mem0 is not None)
-            lid_bev_ = lidar_occ_mem0.permute(0, 1, 3, 2, 4).reshape(
-            B, lidar_occ_mem0.shape[1] * self.Y_rad, self.Z_rad, self.X_rad
-            ).clone()  # ← hier clone einfügen
+            if self.use_lidar_encoder:
+                if self.lidar_encoder_type == 'voxel_net':
+                    lid_bev_ = self.lidar_encoder(
+                        voxel_features=lidar_occ_mem0[0],
+                        voxel_coords=lidar_occ_mem0[1],
+                        number_of_occupied_voxels=lidar_occ_mem0[2],
+                        dinovoxel=dinovoxel,
+                    )
+                else:
+                    if self.is_master:
+                        print('LiDAR encoder type not supported')
+                    lid_bev_ = torch.zeros((B, self.latent_dim, self.Z_rad, self.X_rad), device=device)
+            else:
+                if self.is_master:
+                    print('#############    NO LIDAR ENCODING    ##############')
+                lid_bev_ = torch.zeros((B, self.latent_dim, self.Z_rad, self.X_rad), device=device)
 
-            lid_bev_ = self.lidar_feats_compr(lid_bev_)
-
-
+        # fuse radar and LiDAR features via cross-attention
         if self.use_radar and self.use_lidar:
-            rad_bev_ = rad_bev_.clone() + lid_bev_
+            rad_bev_query = rad_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
+            lid_bev_query = lid_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
+            rad_bev_query = self.radar_lidar_attention(rad_bev_query, lid_bev_query)
         elif self.use_lidar and not self.use_radar:
-            rad_bev_ = lid_bev_
+            rad_bev_query = lid_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
+        else:
+            rad_bev_query = rad_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
 
         # #### Transformer STAGE ####
 
@@ -1106,15 +1144,9 @@ class SegnetTransformerLiftFuse(nn.Module):
             feat_bev_q_dim = self.imgs_bev_compressor(feat_bev_)
             img_feat_bev_q_dim = feat_bev_q_dim.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
 
-            if self.use_radar or self.use_lidar:
-                query_list = []
-                if self.use_radar:
-                    rad_bev_q_dim = rad_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
-                    query_list.append(self.image_based_query_attention(rad_bev_q_dim, img_feat_bev_q_dim))
-                if self.use_lidar:
-                    lid_bev_q_dim = lid_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
-                    query_list.append(self.image_based_query_attention(lid_bev_q_dim, img_feat_bev_q_dim))
-                bev_queries = torch.stack(query_list, dim=0).mean(dim=0)
+            if self.use_radar:
+                rad_bev_q_dim = rad_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
+                bev_queries = self.image_based_query_attention(rad_bev_q_dim, img_feat_bev_q_dim)
             else:
                 bev_queries = img_feat_bev_q_dim
 
@@ -1213,21 +1245,19 @@ class SegnetTransformerLiftFuse(nn.Module):
         # fuser
         bev_queries_fuser_out = torch.zeros_like(bev_queries)
         if self.use_radar or self.use_lidar:
-            # convert radar features into matching query
-            rad_bev_query = rad_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
-
             # positional encoding
             if self.use_radar_as_k_v:
                 if self.combine_feat_init_w_learned_q:
                     fuse_bev_queries = bev_queries_cam_out + bev_fuse_queries_learned + bev_queries_fuse_pos
                 else:
                     fuse_bev_queries = bev_queries_cam_out + bev_queries_fuse_pos
-            else:  # use radar as query
+                fusion_kv = rad_bev_query
+            else:  # use fused radar/LiDAR as query
                 if self.combine_feat_init_w_learned_q or self.learnable_fuse_query:
                     fuse_bev_queries = rad_bev_query + bev_fuse_queries_learned + bev_queries_fuse_pos
                 else:
                     fuse_bev_queries = rad_bev_query + bev_queries_fuse_pos
-            # rad_bev_query = rad_bev_query + bev_queries_fuse_pos
+                fusion_kv = bev_queries_cam_out
 
             for i in range(self.num_layers):
                 # self attention within the features (B, N, C)
@@ -1236,10 +1266,7 @@ class SegnetTransformerLiftFuse(nn.Module):
                 # normalize (B, N, C)
                 bev_queries = self.norm1_layers_fuser[i](bev_queries)
                 # fusing layer
-                if self.use_radar_as_k_v:
-                    bev_queries = self.fusing_attn_layers_fuser[i](bev_queries, rad_bev_query)  # rad_bev_query
-                else:
-                    bev_queries = self.fusing_attn_layers_fuser[i](bev_queries, bev_queries_cam_out)
+                bev_queries = self.fusing_attn_layers_fuser[i](bev_queries, fusion_kv)
 
                 # normalize (B, N, C)
                 bev_queries = self.norm2_layers_fuser[i](bev_queries)

@@ -300,7 +300,7 @@ def get_nusc_maps(map_folder):
     return nusc_maps
 
 
-def fetch_nusc_map2(rec, nusc_maps, nusc, scene2map, car_from_current):
+def fetch_nusc_map2(rec, nusc_maps, nusc, scene2map, car_from_current, canvas_size):
     egopose = nusc.get('ego_pose', nusc.get('sample_data', rec['data']['LIDAR_TOP'])['ego_pose_token'])
 
     global_from_car = transform_matrix(egopose['translation'],
@@ -329,12 +329,13 @@ def fetch_nusc_map2(rec, nusc_maps, nusc, scene2map, car_from_current):
     # print("Car rot angle: ", rot_angle)
     patch_angle = rot_angle  # angle in degrees
     # patch_angle = 0.0  # for debugging only
-    canvas_size = (200, 200)  # size of generated output mask -> 200x200
     layer_names = poly_names + line_names
-    map_mask = nusc_maps[map_name].get_map_mask(patch_box=patch_box,
-                                                patch_angle=patch_angle,
-                                                layer_names=layer_names,
-                                                canvas_size=canvas_size)
+    map_mask = nusc_maps[map_name].get_map_mask(
+        patch_box=patch_box,
+        patch_angle=patch_angle,
+        layer_names=layer_names,
+        canvas_size=canvas_size,
+    )
 
     """ Debug: test if mask is correct:
     figsize = (12, 4)
@@ -459,7 +460,7 @@ def get_rgba_map_from_mask2(map_masks, threshold=0.8, a=0.4):
     for layer, (mask, color) in enumerate(zip(map_masks, masks_colors)):
         alpha = a * (mask > threshold).astype(np.float32)  # a = 0.4
         # Assign RGB values based on the color
-        rgb = np.full((3, 200, 200), color[..., np.newaxis, np.newaxis])
+        rgb = np.full((3, masks_shape[1], masks_shape[2]), color[..., np.newaxis, np.newaxis])
 
         # Combine the RGB and alpha channels
         rgba = np.concatenate([rgb, np.expand_dims(alpha, axis=0)], axis=0)
@@ -488,20 +489,20 @@ def get_rgba_map_from_mask2_on_batch(map_masks: torch.Tensor, threshold: float =
     """
     B, classes, length_z, length_x = map_masks.shape  # (B,7,200,200)
     # (7, 200, 200)
-    bev_map = np.ones((B, 3, 200, 200))  # (B, 3, 200, 200)
-    rgba_image = np.ones((4, length_z, length_x), dtype=np.float32)  # (B, 4, 200, 200)
+    bev_map = np.ones((B, 3, length_z, length_x))
+    rgba_image = np.ones((4, length_z, length_x), dtype=np.float32)
 
     for b in range(B):
         for layer, (mask, color) in enumerate(zip(map_masks[b], masks_colors)):
-            alpha = a * (mask > threshold).astype(np.float32)  # a = 0.4   # (200, 200)
+            alpha = a * (mask > threshold).astype(np.float32)
             # Assign RGB values based on the color
-            rgb = np.full((3, 200, 200), color[..., np.newaxis, np.newaxis])  # (3, 200, 200)
+            rgb = np.full((3, length_z, length_x), color[..., np.newaxis, np.newaxis])
 
             # Combine the RGB and alpha channels
-            rgba = np.concatenate([rgb, np.expand_dims(alpha, axis=0)], axis=0)  # (4, 200, 200)
+            rgba = np.concatenate([rgb, np.expand_dims(alpha, axis=0)], axis=0)
 
             # Update the RGBA image with the values of the current mask
-            rgba_image = rgba_image * (1 - alpha) + rgba * alpha  # (4, 200, 200)
+            rgba_image = rgba_image * (1 - alpha) + rgba * alpha
 
         bev_map[b] = rgba_image[:3]
 
@@ -532,6 +533,9 @@ class NuscData(torch.utils.data.Dataset):
         self.res_3d = res_3d
         self.bounds = bounds
         self.centroid = centroid
+
+        if self.res_3d is not None:
+            self.canvas_size = (self.res_3d[0], self.res_3d[2])
 
         self.seqlen = seqlen
         self.refcam_id = refcam_id
@@ -1050,7 +1054,14 @@ class VizData(NuscData):
         car_from_current[:3, :3] = rots[0].numpy()
         car_from_current[:3, 3] = np.transpose(trans[0].numpy())
 
-        map_mask, egocar_bev = fetch_nusc_map2(rec, self.nusc_maps, self.nusc, scene2map, car_from_current)
+        map_mask, egocar_bev = fetch_nusc_map2(
+            rec,
+            self.nusc_maps,
+            self.nusc,
+            scene2map,
+            car_from_current,
+            self.canvas_size,
+        )
 
         bev_map = get_rgba_map_from_mask2(map_masks=map_mask, threshold=0.8, a=1.0)  # a = 0.8
         bev_map_mask = torch.Tensor(map_mask)

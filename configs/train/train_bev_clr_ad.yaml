@@ -33,6 +33,7 @@ rand_crop_and_resize: true
 ncams: 6
 nsweeps: 5
 lidar_nsweeps: 1
+grid_dim: [200, 8, 200]
 
 # Model parameters
 encoder_type: 'dino_v2'

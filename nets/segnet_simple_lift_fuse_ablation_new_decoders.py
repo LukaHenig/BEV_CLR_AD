@@ -484,9 +484,15 @@ class SegnetSimpleLiftFuse(nn.Module):
             if self.radar_encoder_type == "voxel_net":
                 # if reduced_zx==True -> 100x100 instead of 200x200
                 # if use_col=False: added RPN after CML
-                self.radar_encoder = VoxelNet(use_col=self.use_rpn_radar, reduced_zx=False,
-                                              output_dim=latent_dim,
-                                              use_radar_occupancy_map=self.use_radar_occupancy_map)
+                self.radar_encoder = VoxelNet(
+                    use_col=self.use_rpn_radar,
+                    reduced_zx=False,
+                    output_dim=latent_dim,
+                    use_radar_occupancy_map=self.use_radar_occupancy_map,
+                    Z=Z_rad,
+                    Y=Y_rad,
+                    X=X_rad,
+                )
             else:
                 print("Radar encoder not found ")
         elif not self.use_radar_encoder and self.use_radar and self.is_master:
@@ -496,9 +502,15 @@ class SegnetSimpleLiftFuse(nn.Module):
 
         if self.use_lidar_encoder and self.use_lidar:
             if self.lidar_encoder_type == "voxel_net":
-                self.lidar_encoder = VoxelNet(use_col=False, reduced_zx=False,
-                                             output_dim=latent_dim,
-                                             use_radar_occupancy_map=False)
+                  self.lidar_encoder = VoxelNet(
+                      use_col=False,
+                      reduced_zx=False,
+                      output_dim=latent_dim,
+                      use_radar_occupancy_map=False,
+                      Z=Z_rad,
+                      Y=Y_rad,
+                      X=X_rad,
+                  )
             else:
                 print("Lidar encoder not found ")
 

@@ -3,7 +3,7 @@ exp_name: 'BEV_CLR_AD'
 
 # Training parameters
 max_iters: 50000
-log_freq: 10
+log_freq: 100
 shuffle: true
 dset: 'trainval'
 save_freq: 1000
@@ -28,7 +28,7 @@ load_scheduler: true
 
 # Data parameters
 final_dim: [448, 896]  # to match //8, //14, //16 and //32 in Vit
-rand_flip: true
+rand_flip: false
 rand_crop_and_resize: true
 ncams: 6
 nsweeps: 5

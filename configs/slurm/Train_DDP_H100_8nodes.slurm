@@ -6,7 +6,7 @@
 #SBATCH --ntasks=96                   # 1 Task pro GPU
 #SBATCH --mem=1400G
 #SBATCH --output=logs_train/DDP_H100/%x_%j.out
-#SBATCH --job-name=bevcar_train
+#SBATCH --job-name=bev_clr_ad_train_ddp
 
 # Lade Module oder aktiviere Umgebung
 #source ~/.bashrc

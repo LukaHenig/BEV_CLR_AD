@@ -28,7 +28,7 @@ from nets.segnet_simple_bev_with_map import SegnetWithMap
 from nets.segnet_simple_lift_fuse_ablation_new_decoders import (
     SegnetSimpleLiftFuse,
 )
-from nets.segnet_transformer_lift_fuse_new_decoders import (
+from nets.segnet_transformer_lift_fuse_lidar import (
     SegnetTransformerLiftFuse,
 )
 

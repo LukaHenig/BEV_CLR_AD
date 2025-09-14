@@ -3,7 +3,7 @@ exp_name: 'BEV_CLR_AD'
 
 # Training parameters
 max_iters: 50000
-log_freq: 100
+log_freq: 10
 shuffle: true
 dset: 'trainval'
 save_freq: 1000

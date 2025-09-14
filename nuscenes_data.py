@@ -1114,6 +1114,16 @@ class VizData(NuscData):
         radar_data = np.transpose(radar_data)
         radar_data = torch.from_numpy(radar_data).float()
 
+        if lidar_data is not None:
+            lidar_data = np.transpose(lidar_data)
+            V_lid = 50000 * self.lidar_nsweeps
+            if lidar_data.shape[0] > V_lid:
+                lidar_data = lidar_data[:V_lid]
+            elif lidar_data.shape[0] < V_lid:
+                lidar_data = np.pad(lidar_data, [(0, V_lid - lidar_data.shape[0]), (0, 0)], mode='constant')
+            lidar_data = np.transpose(lidar_data)
+            lidar_data = torch.from_numpy(lidar_data).float()
+
         binimg = (binimg > 0).float()
         seg_bev = (seg_bev > 0).float()
 

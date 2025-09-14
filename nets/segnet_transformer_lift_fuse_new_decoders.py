@@ -142,13 +142,16 @@ class UpsamplingAdd(nn.Module):
 
 class VanillaSelfAttention(nn.Module):
     # adapted from https://github.com/zhiqi-li/BEVFormer
-    def __init__(self, dim: int = 128, dropout: float = 0.1, vis_feats: bool = False):
+    def __init__(self, dim: int = 128, dropout: float = 0.1, vis_feats: bool = False,
+                 Z: int = 200, X: int = 200):
         super(VanillaSelfAttention, self).__init__()
         self.dim = dim
         self.dropout = nn.Dropout(dropout)
         # Deform.DETR: n_heads=8 n_points=4
         self.deformable_attention = MSDeformAttn(d_model=dim, n_levels=1, n_heads=8, n_points=4)
         self.vis_feats = vis_feats
+        self.Z = Z
+        self.X = X
 
     def forward(self, query: torch.Tensor) -> torch.Tensor:
         """
@@ -160,7 +163,7 @@ class VanillaSelfAttention(nn.Module):
         inp_residual = query.clone()
         B, N, C = query.shape
 
-        Z, X = 200, 200
+        Z, X = self.Z, self.X
         # generate reference points in the BEV plane for spatial self-attention
         ref_z, ref_x = torch.meshgrid(
             torch.linspace(0.5, Z - 0.5, Z, dtype=torch.float, device=query.device),
@@ -173,7 +176,7 @@ class VanillaSelfAttention(nn.Module):
         reference_points = reference_points.repeat(B, 1, 1).unsqueeze(2)  # (B, N, 1, 2)
 
         if self.vis_feats:
-            reference_points_reshape = reference_points.reshape(1, 200, 200, 1, 2)
+            reference_points_reshape = reference_points.reshape(1, Z, X, 1, 2)
             reference_points_reshape_np = reference_points_reshape.detach().cpu().numpy()
             img = plt.imshow(reference_points_reshape_np[0, :, :, 0, 0])
             plt.savefig("reference_points_z.png")
@@ -187,8 +190,7 @@ class VanillaSelfAttention(nn.Module):
             # --> changed from 'agg' to 'tkagg'
             plt.savefig("reference_points.png")
 
-        input_spatial_shapes = query.new_zeros([1, 2]).long()
-        input_spatial_shapes[:] = 200
+        input_spatial_shapes = query.new_tensor([[Z, X]]).long()
         input_level_start_index = query.new_zeros([1, ]).long()
         queries = self.deformable_attention(query, reference_points, query.clone(),
                                             input_spatial_shapes, input_level_start_index)
@@ -286,14 +288,14 @@ class SpatialCrossAttention(nn.Module):
 
 
 class FusingCrossAttentionV2(nn.Module):
-    """
-    utilizes deformable attention to fuse camera- and radar BEV embeddings
-    """
+    """utilizes deformable attention to fuse camera- and radar BEV embeddings"""
 
-    def __init__(self, dim: int = 128, dropout: float = 0.1):
+    def __init__(self, dim: int = 128, dropout: float = 0.1, Z: int = 200, X: int = 200):
         super(FusingCrossAttentionV2, self).__init__()
         self.dim = dim
         self.dropout = nn.Dropout(dropout)
+        self.Z = Z
+        self.X = X
         # Deform.DETR: n_heads=8 n_points=4
         self.fusing_deformable_attention = MSDeformAttn(d_model=dim, n_levels=1, n_heads=8, n_points=4)
 
@@ -314,7 +316,7 @@ class FusingCrossAttentionV2(nn.Module):
             query = query + query_pos
 
         B, N, C = query.shape
-        Z, X = 200, 200
+        Z, X = self.Z, self.X
         ref_z, ref_x = torch.meshgrid(
             torch.linspace(0.5, Z - 0.5, Z, dtype=torch.float, device=query.device),
             torch.linspace(0.5, X - 0.5, X, dtype=torch.float, device=query.device),
@@ -325,8 +327,7 @@ class FusingCrossAttentionV2(nn.Module):
         reference_points = torch.stack((ref_z, ref_x), -1)
         reference_points = reference_points.repeat(B, 1, 1).unsqueeze(2)  # (B, N, 1, 2)
 
-        input_spatial_shapes = query.new_zeros([1, 2]).long()
-        input_spatial_shapes[:] = 200
+        input_spatial_shapes = query.new_tensor([[Z, X]]).long()
         input_level_start_index = query.new_zeros([1, ]).long()
         queries = self.fusing_deformable_attention(query, reference_points, input_feats,
                                                    input_spatial_shapes, input_level_start_index)
@@ -749,9 +750,15 @@ class SegnetTransformerLiftFuse(nn.Module):
             if self.radar_encoder_type == "voxel_net":
                 # if reduced_zx==True -> 100x100 instead of 200x200
                 # if use_col=True: added RPN after CML -->  in our case RPN lead to worse performance
-                self.radar_encoder = VoxelNet(use_col=self.use_rpn_radar, reduced_zx=False,
-                                              output_dim=latent_dim,
-                                              use_radar_occupancy_map=self.use_radar_occupancy_map)
+                self.radar_encoder = VoxelNet(
+                    use_col=self.use_rpn_radar,
+                    reduced_zx=False,
+                    output_dim=latent_dim,
+                    use_radar_occupancy_map=self.use_radar_occupancy_map,
+                    Z=Z_rad,
+                    Y=Y_rad,
+                    X=X_rad,
+                )
             else:
                 print("Radar encoder not found ")
         elif not self.use_radar_encoder and self.use_radar and self.is_master:
@@ -777,7 +784,9 @@ class SegnetTransformerLiftFuse(nn.Module):
             )
 
             if self.use_radar or self.use_lidar:
-                self.image_based_query_attention = FusingCrossAttentionV2(dim=latent_dim)
+                self.image_based_query_attention = FusingCrossAttentionV2(
+                    dim=latent_dim, Z=Z_cam, X=X_cam
+                )
 
         # init queries
         self.bev_queries = nn.Parameter(0.1 * torch.randn(latent_dim, Z_cam, X_cam).float(), requires_grad=True)
@@ -789,15 +798,15 @@ class SegnetTransformerLiftFuse(nn.Module):
         else:
             num_levels = 1
 
-        self.self_attn_layers_encoder = nn.ModuleList([
-            VanillaSelfAttention(dim=latent_dim) for _ in range(num_layers)
-        ])  # deformable self attention
+        self.self_attn_layers_encoder = nn.ModuleList(
+            [VanillaSelfAttention(dim=latent_dim, Z=Z_cam, X=X_cam) for _ in range(num_layers)]
+        )  # deformable self attention
         self.norm1_layers_encoder = nn.ModuleList([
             nn.LayerNorm(latent_dim) for _ in range(num_layers)
         ])
-        self.cross_attn_layers_encoder = nn.ModuleList([
-            SpatialCrossAttention(dim=latent_dim, num_levels=num_levels) for _ in range(num_layers)
-        ])
+        self.cross_attn_layers_encoder = nn.ModuleList(
+            [SpatialCrossAttention(dim=latent_dim, num_levels=num_levels) for _ in range(num_layers)]
+        )
         self.norm2_layers_encoder = nn.ModuleList([
             nn.LayerNorm(latent_dim) for _ in range(num_layers)
         ])
@@ -812,19 +821,21 @@ class SegnetTransformerLiftFuse(nn.Module):
 
         # TransFusion
         if self.use_radar or self.use_lidar:
-            self.bev_fuse_queries = nn.Parameter(0.1 * torch.randn(latent_dim, Z_cam, X_cam).float(),
-                                                 requires_grad=True)
-            self.bev_queries_fuse_pos = nn.Parameter(0.1 * torch.randn(latent_dim, Z_cam, X_cam).float(),
-                                                     requires_grad=True)  # C, Z, X
-            self.self_attn_layers_fuser = nn.ModuleList([
-                VanillaSelfAttention(dim=latent_dim) for _ in range(num_layers)
-            ])  # deformable self attention
-            self.norm1_layers_fuser = nn.ModuleList([
-                nn.LayerNorm(latent_dim) for _ in range(num_layers)
-            ])
-            self.fusing_attn_layers_fuser = nn.ModuleList([
-                FusingCrossAttentionV2(dim=latent_dim) for _ in range(num_layers)
-            ])
+            self.bev_fuse_queries = nn.Parameter(
+                0.1 * torch.randn(latent_dim, Z_cam, X_cam).float(), requires_grad=True
+            )
+            self.bev_queries_fuse_pos = nn.Parameter(
+                0.1 * torch.randn(latent_dim, Z_cam, X_cam).float(), requires_grad=True
+            )  # C, Z, X
+            self.self_attn_layers_fuser = nn.ModuleList(
+                [VanillaSelfAttention(dim=latent_dim, Z=Z_cam, X=X_cam) for _ in range(num_layers)]
+            )  # deformable self attention
+            self.norm1_layers_fuser = nn.ModuleList(
+                [nn.LayerNorm(latent_dim) for _ in range(num_layers)]
+            )
+            self.fusing_attn_layers_fuser = nn.ModuleList(
+                [FusingCrossAttentionV2(dim=latent_dim, Z=Z_cam, X=X_cam) for _ in range(num_layers)]
+            )
             self.norm2_layers_fuser = nn.ModuleList([
                 nn.LayerNorm(latent_dim) for _ in range(num_layers)
             ])

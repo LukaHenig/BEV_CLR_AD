@@ -228,7 +228,16 @@ class RPN(nn.Module):
 
 class VoxelNet(nn.Module):
 
-    def __init__(self, use_col=False, reduced_zx=False, output_dim=128, use_radar_occupancy_map=False):
+    def __init__(
+        self,
+        use_col: bool = False,
+        reduced_zx: bool = False,
+        output_dim: int = 128,
+        use_radar_occupancy_map: bool = False,
+        Z: int = 200,
+        Y: int = 8,
+        X: int = 200,
+    ):
         super(VoxelNet, self).__init__()
         self.use_col = use_col  # use convolutional output layer
         self.reduced_zx = reduced_zx
@@ -236,6 +245,7 @@ class VoxelNet(nn.Module):
         self.svfe = SVFE()
         self.cml = CML(self.reduced_zx)
         self.use_radar_occupancy_map = use_radar_occupancy_map
+        self.Z, self.Y, self.X = Z, Y, X
         if self.output_dim != 128 and not use_col:
             self.fit_adapter = nn.Sequential(
                 nn.Conv2d(128, self.output_dim, kernel_size=1, padding=0, stride=1, bias=False),
@@ -250,7 +260,9 @@ class VoxelNet(nn.Module):
 
     def voxel_indexing(self, sparse_features, coords, number_of_occupied_voxels, dinovoxel=None):
         B, voxels, dim = sparse_features.shape
-        dense_feature = Variable(torch.zeros((B, dim, 200, 8, 200), device=sparse_features.device))
+        dense_feature = Variable(
+            torch.zeros((B, dim, self.Z, self.Y, self.X), device=sparse_features.device)
+        )
         coords_idx = coords.long()
         max_voxels = torch.max(number_of_occupied_voxels).long()
 
@@ -260,9 +272,9 @@ class VoxelNet(nn.Module):
         x = coords_idx[:, :, 2].view(B * N)
         feat = sparse_features.view(B * N, -1)
 
-        X = 200
-        Y = 8
-        Z = 200
+        X = self.X
+        Y = self.Y
+        Z = self.Z
         D2 = 128
 
         dim3 = X

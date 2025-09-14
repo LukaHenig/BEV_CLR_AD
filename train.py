@@ -57,8 +57,6 @@ ZMIN, ZMAX = -50, 50
 YMIN, YMAX = -5, 5
 bounds = (XMIN, XMAX, YMIN, YMAX, ZMIN, ZMAX)
 
-Z, Y, X = 200, 8, 200
-
 
 def requires_grad(parameters: iter, flag: bool = True) -> None:
     """
@@ -451,9 +449,9 @@ def create_train_pool_dict(name: str, n_pool: int) -> tuple[dict, str]:
     return train_pool_dict, name
 
 
-def run_model(model, loss_fn, map_seg_loss_fn, d, device='cuda:0', sw=None, use_radar_encoder=None,
-              radar_encoder_type=None, train_task='both', use_shallow_metadata=True,
-              use_obj_layer_only_on_map=True, use_lidar=False):
+def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=None,
+              use_radar_encoder=None, radar_encoder_type=None, train_task='both',
+              use_shallow_metadata=True, use_obj_layer_only_on_map=True, use_lidar=False):
     metrics = {}
     total_loss = torch.tensor(0.0, requires_grad=True).to(device)
 
@@ -970,6 +968,7 @@ def main(
         model_type='transformer',
         use_radar_occupancy_map=False,
         learnable_fuse_query=True,
+        grid_dim=(200, 8, 200),
         # wandb
         group='debug',
         notes='debug run',
@@ -978,6 +977,8 @@ def main(
     assert (model_type in ['transformer', 'simple_lift_fuse', 'SimpleBEV_map'])
     B = batch_size
     assert (B % len(device_ids) == 0)  # batch size must be divisible by number of gpus
+
+    Z, Y, X = grid_dim
     if grad_acc > 1:
         print('effective batch size:', B * grad_acc)
     device = 'cuda:%d' % device_ids[0]
@@ -1131,11 +1132,11 @@ def main(
 
     # Transformer based lifting and fusion
     if model_type == 'transformer':
-        model = SegnetTransformerLiftFuse(Z_cam=200, Y_cam=8, X_cam=200, Z_rad=Z, Y_rad=Y, X_rad=X, vox_util=None,
-                                          use_radar=use_radar, use_metaradar=use_metaradar,
-                                          use_shallow_metadata=use_shallow_metadata,
-                                          use_radar_encoder=use_radar_encoder, do_rgbcompress=do_rgbcompress,
-                                          encoder_type=encoder_type, radar_encoder_type=radar_encoder_type,
+        model = SegnetTransformerLiftFuse(Z_cam=Z, Y_cam=Y, X_cam=X, Z_rad=Z, Y_rad=Y, X_rad=X, vox_util=None,
+                                         use_radar=use_radar, use_metaradar=use_metaradar,
+                                         use_shallow_metadata=use_shallow_metadata,
+                                         use_radar_encoder=use_radar_encoder, do_rgbcompress=do_rgbcompress,
+                                         encoder_type=encoder_type, radar_encoder_type=radar_encoder_type,
                                           rand_flip=rand_flip, train_task=train_task,
                                           init_query_with_image_feats=init_query_with_image_feats,
                                           use_obj_layer_only_on_map=use_obj_layer_only_on_map,
@@ -1149,10 +1150,10 @@ def main(
 
     elif model_type == 'simple_lift_fuse':
         # our net with replaced lifting and fusion from SimpleBEV
-        model = SegnetSimpleLiftFuse(Z_cam=200, Y_cam=8, X_cam=200, Z_rad=Z, Y_rad=Y, X_rad=X, vox_util=None,
-                                     use_radar=use_radar, use_metaradar=use_metaradar,
-                                     use_shallow_metadata=use_shallow_metadata, use_radar_encoder=use_radar_encoder,
-                                     do_rgbcompress=do_rgbcompress, encoder_type=encoder_type,
+          model = SegnetSimpleLiftFuse(Z_cam=Z, Y_cam=Y, X_cam=X, Z_rad=Z, Y_rad=Y, X_rad=X, vox_util=None,
+                                      use_radar=use_radar, use_metaradar=use_metaradar,
+                                      use_shallow_metadata=use_shallow_metadata, use_radar_encoder=use_radar_encoder,
+                                      do_rgbcompress=do_rgbcompress, encoder_type=encoder_type,
                                      radar_encoder_type=radar_encoder_type, rand_flip=rand_flip, train_task=train_task,
                                      use_obj_layer_only_on_map=use_obj_layer_only_on_map,
                                      do_feat_enc_dec=do_feat_enc_dec,
@@ -1253,12 +1254,23 @@ def main(
             iter_read_time += read_time
 
             # run training iteration
-            total_loss_, metrics_ = run_model(model, seg_loss_fn,
-                                              map_seg_loss_fn,
-                                              sample, device, sw_t, use_radar_encoder, radar_encoder_type, train_task,
-                                              use_shallow_metadata=use_shallow_metadata,
-                                              use_obj_layer_only_on_map=use_obj_layer_only_on_map,
-                                              use_lidar=use_lidar)
+            total_loss_, metrics_ = run_model(
+                model,
+                seg_loss_fn,
+                map_seg_loss_fn,
+                sample,
+                Z,
+                Y,
+                X,
+                device,
+                sw_t,
+                use_radar_encoder,
+                radar_encoder_type,
+                train_task,
+                use_shallow_metadata=use_shallow_metadata,
+                use_obj_layer_only_on_map=use_obj_layer_only_on_map,
+                use_lidar=use_lidar,
+            )
 
             (total_loss_ / grad_acc).backward()
 

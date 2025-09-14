@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import os
 import random
 import time
@@ -27,7 +28,7 @@ from nets.segnet_simple_bev_with_map import SegnetWithMap
 from nets.segnet_simple_lift_fuse_ablation_new_decoders import (
     SegnetSimpleLiftFuse,
 )
-from nets.segnet_transformer_lift_fuse_new_decoders import (
+from nets.segnet_transformer_lift_fuse_lidar import (
     SegnetTransformerLiftFuse,
 )
 
@@ -493,7 +494,8 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device, sw=None, use_radar_enc
 
     if radar_encoder_type == "voxel_net":
         # voxelnet
-        imgs, rots, trans, intrins, seg_bev_g, valid_bev_g, radar_data, bev_map_mask_g, bev_map_g, egocar_bev, \
+        imgs, rots, trans, intrins, seg_bev_g, \
+            valid_bev_g, radar_data, lidar_data, bev_map_mask_g, bev_map_g, egocar_bev, \
             voxel_input_feature_buffer, voxel_coordinate_buffer, number_of_occupied_voxels = d
 
         # VoxelNet preprocessing
@@ -505,7 +507,8 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device, sw=None, use_radar_enc
         number_of_occupied_voxels = number_of_occupied_voxels.to(device)
 
     else:
-        imgs, rots, trans, intrins, seg_bev_g, valid_bev_g, radar_data, bev_map_mask_g, bev_map_g, egocar_bev = d
+        imgs, rots, trans, intrins, seg_bev_g, \
+            valid_bev_g, radar_data, lidar_data, bev_map_mask_g, bev_map_g, egocar_bev = d
 
     B0, T, S, C, H, W = imgs.shape
     assert (T == 1)
@@ -518,6 +521,8 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device, sw=None, use_radar_enc
     seg_bev_g = seg_bev_g[:, 0]
     valid_bev_g = valid_bev_g[:, 0]
     radar_data = radar_data[:, 0]
+    if lidar_data is not None:
+        lidar_data = lidar_data[:, 0]
     # added bev_map_gt
     bev_map_mask_g = bev_map_mask_g[:, 0]
     if use_obj_layer_only_on_map:
@@ -559,6 +564,11 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device, sw=None, use_radar_enc
     xyz_rad = rad_data[:, :, :3]
     meta_rad = rad_data[:, :, 3:]
     shallow_meta_rad = rad_data[:, :, 5:8]
+    if use_lidar:
+        lid_data = lidar_data.to(device).permute(0, 2, 1)
+        xyz_lid = lid_data[:, :, :3]
+    else:
+        xyz_lid = None
 
     B, S, C, H, W = rgb_camXs.shape
 
@@ -579,6 +589,10 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device, sw=None, use_radar_enc
 
     cam0_T_camXs = utils.geom.get_camM_T_camXs(velo_T_cams, ind=0)
     rad_xyz_cam0 = utils.geom.apply_4x4(cams_T_velo[:, 0], xyz_rad)
+    if xyz_lid is not None:
+        lid_xyz_cam0 = utils.geom.apply_4x4(cams_T_velo[:, 0], xyz_lid)
+    else:
+        lid_xyz_cam0 = None
 
     vox_util = utils.vox.Vox_util(
         Z, Y, X,
@@ -605,12 +619,26 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device, sw=None, use_radar_enc
     elif model.module.use_metaradar or use_shallow_metadata:
         assert False  # cannot use_metaradar without use_radar
 
-    seg_e = model(
-        rgb_camXs=rgb_camXs,
-        pix_T_cams=pix_T_cams,
-        cam0_T_camXs=cam0_T_camXs,
-        vox_util=vox_util,
-        rad_occ_mem0=in_occ_mem0)
+    if use_lidar and lid_xyz_cam0 is not None:
+        lid_occ_mem0 = vox_util.voxelize_xyz(lid_xyz_cam0, Z, Y, X, assert_cube=False)
+
+    module = model.module if hasattr(model, "module") else model
+    forward_params = inspect.signature(module.forward).parameters
+    if "lidar_occ_mem0" in forward_params:
+        seg_e = model(
+            rgb_camXs=rgb_camXs,
+            pix_T_cams=pix_T_cams,
+            cam0_T_camXs=cam0_T_camXs,
+            vox_util=vox_util,
+            rad_occ_mem0=in_occ_mem0,
+            lidar_occ_mem0=lid_occ_mem0)
+    else:
+        seg_e = model(
+            rgb_camXs=rgb_camXs,
+            pix_T_cams=pix_T_cams,
+            cam0_T_camXs=cam0_T_camXs,
+            vox_util=vox_util,
+            rad_occ_mem0=in_occ_mem0)
 
     # get bev map from masks
     if train_task == 'both' or train_task == 'map':
@@ -891,6 +919,7 @@ def main(
         rand_crop_and_resize=True,
         ncams=6,
         nsweeps=5,
+        lidar_nsweeps=5,
         # model
         encoder_type='dino_v2',
         radar_encoder_type='voxel_net',
@@ -901,6 +930,7 @@ def main(
         use_radar_encoder=False,
         use_metaradar=False,
         use_shallow_metadata=False,
+        use_lidar=False,
         use_pre_scaled_imgs=False,
         use_obj_layer_only_on_map=False,
         init_query_with_image_feats=False,
@@ -1045,6 +1075,7 @@ def main(
         "rand_crop_and_resize": rand_crop_and_resize,
         "ncams": ncams,
         "nsweeps": nsweeps,
+        "lidar_nsweeps": lidar_nsweeps,
         # model
         "encoder_type": encoder_type,
         "radar_encoder_type": radar_encoder_type,
@@ -1064,6 +1095,7 @@ def main(
         "freeze_dino": freeze_dino,
         "model_type": model_type,
         "use_radar_occupancy_map": use_radar_occupancy_map,
+        "use_lidar": use_lidar,
         "combine_feat_init_w_learned_q": combine_feat_init_w_learned_q,
     }
 
@@ -1108,6 +1140,8 @@ def main(
         custom_dataroot=custom_dataroot,
         use_obj_layer_only_on_map=use_obj_layer_only_on_map,
         use_radar_occupancy_map=use_radar_occupancy_map,
+        use_lidar=use_lidar,
+        lidar_nsweeps=lidar_nsweeps,
     )
     train_iterloader = iter(train_dataloader)
 
@@ -1258,7 +1292,8 @@ def main(
                                               map_seg_loss_fn,
                                               sample, device, sw_t, use_radar_encoder, radar_encoder_type, train_task,
                                               is_master=is_master, use_shallow_metadata=use_shallow_metadata,
-                                              use_obj_layer_only_on_map=use_obj_layer_only_on_map)
+                                              use_obj_layer_only_on_map=use_obj_layer_only_on_map,
+                                              use_lidar=use_lidar)
 
             (total_loss_ / grad_acc).backward()
 

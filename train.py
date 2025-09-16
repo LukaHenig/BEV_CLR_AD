@@ -945,6 +945,7 @@ def main(
         # model
         encoder_type='dino_v2',
         radar_encoder_type='voxel_net',
+        lidar_encoder_type='voxel_net',
         use_rpn_radar=False,
         train_task='both',
         use_radar=False,
@@ -953,6 +954,8 @@ def main(
         use_metaradar=False,
         use_shallow_metadata=False,
         use_lidar=False,
+        use_lidar_encoder=False,
+        use_lidar_occupancy_map=False,
         use_pre_scaled_imgs=False,
         use_obj_layer_only_on_map=False,
         init_query_with_image_feats=True,
@@ -1020,6 +1023,11 @@ def main(
     else:
         print("NO RADAR ENCODER")
 
+    if use_lidar_encoder:
+        print("Lidar encoder: ", lidar_encoder_type)
+    else:
+        print("NO LIDAR ENCODER")
+
     # wandb extension
     wandb_config = {
         "exp_name": exp_name,
@@ -1055,9 +1063,13 @@ def main(
         # model
         "encoder_type": encoder_type,
         "radar_encoder_type": radar_encoder_type,
+        "lidar_encoder_type": lidar_encoder_type,
         "use_radar": use_radar,
+        "use_lidar": use_lidar,
         "use_radar_filters": use_radar_filters,
         "use_radar_encoder": use_radar_encoder,
+        "use_lidar_encoder": use_lidar_encoder,
+        "use_lidar_occupancy_map": use_lidar_occupancy_map,
         "use_metaradar": use_metaradar,
         "use_shallow_metadata": use_shallow_metadata,
         "do_rgbcompress": do_rgbcompress,
@@ -1067,12 +1079,11 @@ def main(
         "use_pre_scaled_imgs": use_pre_scaled_imgs,
         "use_obj_layer_only_on_map": use_obj_layer_only_on_map,
         "init_query_with_image_feats": init_query_with_image_feats,
-        "use_multi_scale_img_feats": use_shallow_metadata,
+        "use_multi_scale_img_feats": use_multi_scale_img_feats,
         "num_layers": num_layers,
         "freeze_dino": freeze_dino,
         "model_type": model_type,
         "use_radar_occupancy_map": use_radar_occupancy_map,
-        "use_lidar": use_lidar,
         "combine_feat_init_w_learned_q": combine_feat_init_w_learned_q
     }
 

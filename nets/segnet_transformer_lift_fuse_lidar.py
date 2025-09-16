@@ -770,6 +770,16 @@ class SegnetTransformerLiftFuse(nn.Module):
                 print("#############    CAM ONLY    ##############")
 
         # LiDAR Encoder
+
+        # --- LiDAR occupancy compressor (Solution A) ---
+        # If LiDAR is enabled but NO LiDAR encoder is used, compress occupancy (B,1,Z,Y,X) into (B,C,Z,X).
+        if self.use_lidar and not self.use_lidar_encoder:
+            self.lidar_occ_compressor = nn.Sequential(
+                nn.Conv2d(self.Y_cam, self.latent_dim, kernel_size=3, padding=1, bias=False),
+                nn.InstanceNorm2d(self.latent_dim),
+                nn.GELU(),
+            )
+
         if self.use_lidar_encoder and self.use_lidar:
             if self.lidar_encoder_type == "voxel_net":
                 # if reduced_zx==True -> 100x100 instead of 200x200
@@ -1096,9 +1106,16 @@ class SegnetTransformerLiftFuse(nn.Module):
                         print('LiDAR encoder type not supported')
                     lid_bev_ = torch.zeros((B, self.latent_dim, self.Z_rad, self.X_rad), device=device)
             else:
-                if self.is_master:
-                    print('#############    NO LIDAR ENCODING    ##############')
-                lid_bev_ = torch.zeros((B, self.latent_dim, self.Z_rad, self.X_rad), device=device)
+                # Solution A: LiDAR occupancy -> lightweight compressor
+                # lidar_occ_mem0: (B, 1, Z, Y, X)
+                assert lidar_occ_mem0.ndim == 5, "Expected (B,1,Z,Y,X) for LiDAR occupancy"
+                assert lidar_occ_mem0.shape[2] == self.Z_cam and \
+                       lidar_occ_mem0.shape[3] == self.Y_cam and \
+                       lidar_occ_mem0.shape[4] == self.X_cam, "LiDAR occupancy grid dims must match grid_dim"
+
+                occ = lidar_occ_mem0.squeeze(1)            # (B, Z, Y, X)
+                occ = occ.permute(0, 2, 1, 3).contiguous() # (B, Y, Z, X) -> treat Y as channels
+                lid_bev_ = self.lidar_occ_compressor(occ)  # (B, latent_dim, Z, X)
 
         # fuse radar and LiDAR features via cross-attention
         if self.use_radar and self.use_lidar:

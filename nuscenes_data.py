@@ -351,21 +351,28 @@ def fetch_nusc_map2(rec, nusc_maps, nusc, scene2map, car_from_current, canvas_si
     ego_in_bev = np.zeros_like(map_mask[0])
 
     W = 1.85
-    bx = -49.75
-    dx = 0.5
+    H_pix, W_pix = canvas_size  # (Z, X)
+    # patch is 100m x 100m; meters-per-pixel for a square canvas:
+    dx = 100.0 / float(H_pix)
+    # align to pixel centers (generalizes -49.75 for dx=0.5):
+    bx = -50.0 + dx / 2.0
     car_points = np.array([[-4.084 / 2. + 1, W / 2.],
                            [4.084 / 2. + 1, W / 2.],
                            [4.084 / 2. + 1, -W / 2.],
                            [-4.084 / 2. + 1, -W / 2.]])
 
     car_points_scale_shift = (car_points - bx) / dx
-
-    round_car_approx = np.round(car_points_scale_shift)
-    x = abs((round_car_approx[0][1] + 1) - round_car_approx[-1][1])
-    y = abs(round_car_approx[0][0] - (round_car_approx[1][0] - 1))
-    car_mask = np.ones((int(y), int(x)))
-    ego_in_bev[int(round_car_approx[0][0]): int(round_car_approx[1][0] - 1),
-    int(round_car_approx[-1][1]): int(round_car_approx[0][1] + 1)] = car_mask
+    round_car_approx = np.round(car_points_scale_shift).astype(int)
+    # clamp to canvas to avoid any edge-case broadcasting issues
+    round_car_approx[:, 0] = np.clip(round_car_approx[:, 0], 0, H_pix - 1)
+    round_car_approx[:, 1] = np.clip(round_car_approx[:, 1], 0, W_pix - 1)
+    y0, y1 = sorted([round_car_approx[0, 0], round_car_approx[1, 0] - 1])
+    x0, x1 = sorted([round_car_approx[-1, 1], round_car_approx[0, 1] + 1])
+    y1 = min(y1, H_pix - 1)
+    x1 = min(x1, W_pix - 1)
+    h = max(1, y1 - y0 + 1)
+    w = max(1, x1 - x0 + 1)
+    ego_in_bev[y0:y0 + h, x0:x0 + w] = 1
 
     rot_angle = 0.0
     ego_angle = np.arctan2(car_from_current[1, 0], car_from_current[0, 0])

@@ -4,6 +4,8 @@ import os
 import random
 import time
 import warnings
+# os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # may help for debugging
+# print("FIXED CUDA DEVICE: " + os.environ['CUDA_VISIBLE_DEVICES']) 
 
 import numpy as np
 import torch
@@ -58,7 +60,6 @@ ZMIN, ZMAX = -50, 50
 YMIN, YMAX = -5, 5
 bounds = (XMIN, XMAX, YMIN, YMAX, ZMIN, ZMAX)
 
-Z, Y, X = 200, 8, 200
 
 
 def requires_grad(parameters: iter, flag: bool = True) -> None:
@@ -238,7 +239,10 @@ def collect_metrics_for_wandb(total_loss: torch.Tensor, metrics: dict, mode: str
         None
 
     """
-
+    # Only master should log to wandb
+    if os.environ.get("RANK", "0") != "0":
+        return
+    
     map_labels = ['drivable', 'carpark', 'ped_cross', 'walkway', 'stop_line', 'road_divider',
                   'lane_divider']
     iou_thresholds = [0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8]
@@ -480,9 +484,12 @@ def reduce_loss_metrics(total_loss: torch.Tensor, metrics: dict, train_task: str
     return t_loss_reduced, metrics_reduced
 
 
-def run_model(model, loss_fn, map_seg_loss_fn, d, device, sw=None, use_radar_encoder=None,
-              radar_encoder_type=None, train_task='both', is_master=False, use_shallow_metadata=True,
-              use_obj_layer_only_on_map=False, use_lidar=False):
+def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
+              use_radar_encoder=None, radar_encoder_type=None, train_task='both',
+              is_master=False, use_shallow_metadata=True,
+              use_obj_layer_only_on_map=False,
+              use_lidar=False, use_lidar_encoder=False,
+              lidar_encoder_type=None, use_lidar_occupancy_map=False):
     metrics = {}
     total_loss = torch.tensor(0.0, requires_grad=True).to(device)
 
@@ -560,13 +567,25 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device, sw=None, use_radar_enc
     ego_other_cars_on_map_g = ego_car_on_map_g * (1 - seg_bev_g) + other_cars_plane * seg_bev_g
     ego_other_cars_on_map_e = torch.zeros_like(ego_other_cars_on_map_g)
 
-    rad_data = radar_data.to(device).permute(0, 2, 1)  # B, R, 19
-    xyz_rad = rad_data[:, :, :3]
-    meta_rad = rad_data[:, :, 3:]
+    # --- Radar ---
+    rad_data = radar_data.to(device).permute(0, 2, 1)  # (B, R, 19)
+    rad_valid = (rad_data.abs().sum(dim=-1) > 0)
+    rad_keep  = rad_valid.sum(dim=1).max().item()
+    rad_data  = rad_data[:, :rad_keep, :]
+
+    xyz_rad          = rad_data[:, :, :3]
+    meta_rad         = rad_data[:, :, 3:]
     shallow_meta_rad = rad_data[:, :, 5:8]
+
+    # --- LiDAR ---
     if use_lidar:
-        lid_data = lidar_data.to(device).permute(0, 2, 1)
-        xyz_lid = lid_data[:, :, :3]
+        lid_data = lidar_data.to(device).permute(0, 2, 1)  # (B, V_lid, 5) -> [x,y,z,intensity,time]
+        lid_valid = (lid_data.abs().sum(dim=-1) > 0)
+        lid_keep  = lid_valid.sum(dim=1).max().item()
+        lid_data  = lid_data[:, :lid_keep, :]
+
+        xyz_lid       = lid_data[:, :, :3]
+        lid_intensity = lid_data[:, :, 3:4]
     else:
         xyz_lid = None
 
@@ -874,9 +893,9 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device, sw=None, use_radar_enc
 
             wandb.log({
                 # object seg GT
-                'train/outputs/seg_bev_g': seg_bev_g_wandb,
+                'train/outputs/obj_seg_bev_g': seg_bev_g_wandb,
                 # valid GT seg mask
-                'train/outputs/valid_bev_g': valid_bev_g_wandb,
+                'train/outputs/valid__obj_bev_g': valid_bev_g_wandb,
                 # object seg estimate
                 'train/outputs/obj_seg_bev_e': seg_bev_e_wandb,
                 # object seg estimate (smoothed)
@@ -889,8 +908,8 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device, sw=None, use_radar_enc
 
 
 def main(
-        exp_name='bevcar_debug_ddp',
-        # training
+        exp_name='bev_clr_ad_debug_ddp',
+       # training
         max_iters=75000,
         log_freq=1000,
         shuffle=True,
@@ -904,7 +923,7 @@ def main(
         nworkers=12,
         # data/log/save/load directories
         data_dir='../nuscenes/',
-        custom_dataroot='../../custom_nuscenes/scaled_images',
+        custom_dataroot='../../../nuscenes/scaled_images',
         log_dir='logs_nuscenes_bevcar',
         ckpt_dir='checkpoints/',
         keep_latest=75,
@@ -923,6 +942,7 @@ def main(
         # model
         encoder_type='dino_v2',
         radar_encoder_type='voxel_net',
+        lidar_encoder_type='voxel_net',
         use_rpn_radar=False,
         train_task='both',
         use_radar=False,
@@ -930,10 +950,12 @@ def main(
         use_radar_encoder=False,
         use_metaradar=False,
         use_shallow_metadata=False,
-        use_lidar=False,
+        use_lidar=True,
+        use_lidar_encoder=True,
+        use_lidar_occupancy_map=False,
         use_pre_scaled_imgs=False,
         use_obj_layer_only_on_map=False,
-        init_query_with_image_feats=False,
+        init_query_with_image_feats=True,
         do_rgbcompress=True,
         do_shuffle_cams=True,
         use_multi_scale_img_feats=False,
@@ -946,6 +968,7 @@ def main(
         model_type='transformer',
         use_radar_occupancy_map=False,
         learnable_fuse_query=True,
+        grid_dim=(200, 8, 200),
         # wandb
         group='debug',
         notes='debug run',
@@ -957,6 +980,7 @@ def main(
         device_ids = [0]
 
     B = batch_size
+    Z, Y, X = grid_dim
 
     # Initializes the distributed backend which will take care of synchronizing nodes/GPUs
     dist_url = "env://"  # default
@@ -968,6 +992,9 @@ def main(
     local_rank = int(os.environ['LOCAL_RANK'])
     if rank == 0:
         is_master = True
+
+    if not is_master:
+        os.environ["WANDB_MODE"] = "disabled"
 
     torch.distributed.init_process_group(backend='nccl', init_method=dist_url,
                                          world_size=world_size, rank=rank)
@@ -1026,7 +1053,7 @@ def main(
     dist.barrier()
     if rank == 0:
         try:
-            writer_t = SummaryWriter(os.path.join(log_dir, model_name + '/t'), max_queue=10, flush_secs=60)
+            writer_t = SummaryWriter(os.path.join(log_dir, model_name, 't'), max_queue=10, flush_secs=60)
         except FileExistsError:
             pass
     else:
@@ -1090,7 +1117,7 @@ def main(
         "use_pre_scaled_imgs": use_pre_scaled_imgs,
         "use_obj_layer_only_on_map": use_obj_layer_only_on_map,
         "init_query_with_image_feats": init_query_with_image_feats,
-        "use_multi_scale_img_feats": use_shallow_metadata,
+        "use_multi_scale_img_feats": use_multi_scale_img_feats,
         "num_layers": num_layers,
         "freeze_dino": freeze_dino,
         "model_type": model_type,
@@ -1157,22 +1184,26 @@ def main(
 
     # Transformer based lifting and fusion -> BEVCar
     if model_type == 'transformer':
-        model = SegnetTransformerLiftFuse(Z_cam=200, Y_cam=8, X_cam=200, Z_rad=Z, Y_rad=Y, X_rad=X, vox_util=None,
-                                          use_radar=use_radar, use_metaradar=use_metaradar,
-                                          use_shallow_metadata=use_shallow_metadata,
-                                          use_radar_encoder=use_radar_encoder, do_rgbcompress=do_rgbcompress,
-                                          encoder_type=encoder_type, radar_encoder_type=radar_encoder_type,
-                                          rand_flip=rand_flip, train_task=train_task,
-                                          init_query_with_image_feats=init_query_with_image_feats,
-                                          use_obj_layer_only_on_map=use_obj_layer_only_on_map,
-                                          do_feat_enc_dec=do_feat_enc_dec,
-                                          use_multi_scale_img_feats=use_multi_scale_img_feats, num_layers=num_layers,
-                                          latent_dim=128,
-                                          combine_feat_init_w_learned_q=combine_feat_init_w_learned_q,
-                                          use_rpn_radar=use_rpn_radar, use_radar_occupancy_map=use_radar_occupancy_map,
-                                          freeze_dino=freeze_dino, learnable_fuse_query=learnable_fuse_query,
-                                          is_master=is_master,
-                                          use_lidar=use_lidar)
+        model = SegnetTransformerLiftFuse(
+                                        Z_cam=Z, Y_cam=Y, X_cam=X, Z_rad=Z, Y_rad=Y, X_rad=X, vox_util=None,
+                                        use_radar=use_radar, use_metaradar=use_metaradar,
+                                        use_shallow_metadata=use_shallow_metadata,
+                                        use_radar_encoder=use_radar_encoder, do_rgbcompress=do_rgbcompress,
+                                        encoder_type=encoder_type, radar_encoder_type=radar_encoder_type,
+                                        rand_flip=rand_flip, train_task=train_task,
+                                        init_query_with_image_feats=init_query_with_image_feats,
+                                        use_obj_layer_only_on_map=use_obj_layer_only_on_map,
+                                        do_feat_enc_dec=do_feat_enc_dec, use_multi_scale_img_feats=use_multi_scale_img_feats,
+                                        num_layers=num_layers, latent_dim=128,
+                                        combine_feat_init_w_learned_q=combine_feat_init_w_learned_q,
+                                        use_rpn_radar=use_rpn_radar, use_radar_occupancy_map=use_radar_occupancy_map,
+                                        freeze_dino=freeze_dino, learnable_fuse_query=learnable_fuse_query,
+                                        use_lidar=use_lidar,
+                                        use_lidar_encoder=use_lidar_encoder,
+                                        lidar_encoder_type=lidar_encoder_type,
+                                        use_lidar_occupancy_map=use_lidar_occupancy_map,
+                                        is_master=is_master,
+                                    )
 
     elif model_type == 'simple_lift_fuse':
         # our net with replaced lifting and fusion from SimpleBEV
@@ -1242,7 +1273,8 @@ def main(
     map_seg_loss_fn = SigmoidFocalLoss(alpha=0.25, gamma=3, reduction="sum_of_class_means").to(device)
 
     # wandb setup watcher
-    wandb.watch(model, log_freq=log_freq)
+    if is_master:
+        wandb.watch(model, log_freq=log_freq)
     model.train()
 
     # set up running logging pools
@@ -1267,7 +1299,7 @@ def main(
             # read sample
             read_start_time = time.time()
 
-            if internal_step == grad_acc - 1:
+            if is_master and internal_step == grad_acc - 1:
                 sw_t = utils.improc.Summ_writer(
                     writer=writer_t,
                     global_step=global_step,
@@ -1288,12 +1320,17 @@ def main(
             iter_read_time += read_time
 
             # run training iteration
-            total_loss_, metrics_ = run_model(model, seg_loss_fn,
-                                              map_seg_loss_fn,
-                                              sample, device, sw_t, use_radar_encoder, radar_encoder_type, train_task,
-                                              is_master=is_master, use_shallow_metadata=use_shallow_metadata,
-                                              use_obj_layer_only_on_map=use_obj_layer_only_on_map,
-                                              use_lidar=use_lidar)
+            total_loss_, metrics_ = run_model(
+                model, seg_loss_fn, map_seg_loss_fn, sample, Z, Y, X, device, sw_t,
+                use_radar_encoder, radar_encoder_type, train_task,
+                is_master=is_master,
+                use_shallow_metadata=use_shallow_metadata,
+                use_obj_layer_only_on_map=use_obj_layer_only_on_map,
+                use_lidar=use_lidar,
+                use_lidar_encoder=use_lidar_encoder,
+                lidar_encoder_type=lidar_encoder_type,
+                use_lidar_occupancy_map=use_lidar_occupancy_map,
+)
 
             (total_loss_ / grad_acc).backward()
 
@@ -1344,19 +1381,16 @@ def main(
         train_pool_dict['time_pool_' + train_pool_dict_name].update([iter_time])
 
         # wandb
-        if global_step % log_freq == 0:
-            wandb.log({
-                'train': {
-                    'pooled/time_per_batch': train_pool_dict['time_pool_' + train_pool_dict_name].mean(),
-                    'pooled/time_per_el': train_pool_dict['time_pool_' + train_pool_dict_name].mean() / float(B),
-                }
-            }, commit=False)
-
-        wandb.log({
-            'train': {
-                'params/current_lr': current_lr,
-            }
-        }, commit=True)
+        if is_master and global_step % log_freq == 0:
+         wandb.log({
+             'train': {
+                 'pooled/time_per_batch': train_pool_dict['time_pool_' + train_pool_dict_name].mean(),
+                 'pooled/time_per_el': train_pool_dict['time_pool_' + train_pool_dict_name].mean() / float(B),
+             }
+         }, commit=False)
+     
+        if is_master:
+            wandb.log({'train': {'params/current_lr': current_lr}}, commit=True)
 
         if rank == 0:
             if train_task == 'both':
@@ -1380,10 +1414,12 @@ def main(
                           t_train_loss, t_train_loss_reduced,
                           100 * ddp_train_pool_dict['masks_mean_iou_pool_' + ddp_train_pool_dict_name].mean()))
 
-    writer_t.close()
-    wandb.finish()
+    if is_master and writer_t is not None:
+        writer_t.close()
+    if is_master:
+        wandb.finish()  
 
-    # cleanup the process group
+    # Now all ranks can tear down the process group
     torch.distributed.destroy_process_group()
 
 

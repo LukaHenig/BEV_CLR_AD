@@ -118,9 +118,9 @@ class VFE(nn.Module):
 # Stacked Voxel Feature Encoding
 class SVFE(nn.Module):
 
-    def __init__(self):
+    def __init__(self, in_channels: int):
         super(SVFE, self).__init__()
-        self.vfe_1 = VFE(7, 32)
+        self.vfe_1 = VFE(in_channels, 32)
         self.vfe_2 = VFE(32, 128)
         self.fcn = FCN(128, 128)
 
@@ -228,21 +228,21 @@ class RPN(nn.Module):
 
 class VoxelNet(nn.Module):
 
-    def __init__(
-        self,
-        use_col: bool = False,
-        reduced_zx: bool = False,
-        output_dim: int = 128,
-        use_radar_occupancy_map: bool = False,
-        Z: int = 200,
-        Y: int = 8,
-        X: int = 200,
-    ):
+    def __init__(self, 
+                 use_col=False, 
+                 reduced_zx=False,
+                 output_dim=128,
+                 use_radar_occupancy_map=False,
+                 Z=200, 
+                 Y=8,
+                 X=200,
+                 point_feature_dim: int = 4
+                 ):  # 3 coords + C_feat
         super(VoxelNet, self).__init__()
         self.use_col = use_col  # use convolutional output layer
         self.reduced_zx = reduced_zx
         self.output_dim = output_dim
-        self.svfe = SVFE()
+        self.svfe = SVFE(in_channels=point_feature_dim)
         self.cml = CML(self.reduced_zx)
         self.use_radar_occupancy_map = use_radar_occupancy_map
         self.Z, self.Y, self.X = Z, Y, X

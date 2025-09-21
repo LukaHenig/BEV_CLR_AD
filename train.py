@@ -1,12 +1,11 @@
-# set seed in the beginning
 import argparse
+import inspect
 import os
 import random
-import inspect
-# os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # may help for debugging
-# print("FIXED CUDA DEVICE: " + os.environ['CUDA_VISIBLE_DEVICES'])  # debug-only
 import time
 import warnings
+# os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # may help for debugging
+# print("FIXED CUDA DEVICE: " + os.environ['CUDA_VISIBLE_DEVICES'])  # debug-only
 
 import numpy as np
 import torch
@@ -451,7 +450,8 @@ def create_train_pool_dict(name: str, n_pool: int) -> tuple[dict, str]:
 
 def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=None,
               use_radar_encoder=None, radar_encoder_type=None, train_task='both',
-              use_shallow_metadata=True, use_obj_layer_only_on_map=True, use_lidar=False):
+              use_shallow_metadata=True, use_obj_layer_only_on_map=True,
+              use_lidar=False, use_lidar_encoder=False, lidar_encoder_type=None):
     metrics = {}
     total_loss = torch.tensor(0.0, requires_grad=True).to(device)
 
@@ -528,13 +528,25 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
     ego_other_cars_on_map_g = ego_car_on_map_g * (1 - seg_bev_g) + other_cars_plane * seg_bev_g
     ego_other_cars_on_map_e = torch.zeros_like(ego_other_cars_on_map_g)
 
-    rad_data = radar_data.to(device).permute(0, 2, 1)  # B, R, 19
-    xyz_rad = rad_data[:, :, :3]
-    meta_rad = rad_data[:, :, 3:]
-    shallow_meta_rad = rad_data[:, :, 5:8]
+   # --- Radar ---
+    rad_data = radar_data.to(device).permute(0, 2, 1)  # (B, R, 19)
+    rad_valid = (rad_data.abs().sum(dim=-1) > 0)       # zeros were padded at the end
+    rad_keep = rad_valid.sum(dim=1).max().item()       # longest real length in batch
+    rad_data = rad_data[:, :rad_keep, :]               # drop trailing padded rows
+
+    xyz_rad          = rad_data[:, :, :3]
+    meta_rad         = rad_data[:, :, 3:]
+    shallow_meta_rad = rad_data[:, :, 5:8]             # your shallow meta
+
+    # --- LiDAR ---
     if use_lidar:
-        lid_data = lidar_data.to(device).permute(0, 2, 1)
-        xyz_lid = lid_data[:, :, :3]
+        lid_data = lidar_data.to(device).permute(0, 2, 1)  # (B, V_lid, 5) -> [x,y,z,intensity,time]
+        lid_valid = (lid_data.abs().sum(dim=-1) > 0)
+        lid_keep  = lid_valid.sum(dim=1).max().item()
+        lid_data  = lid_data[:, :lid_keep, :]
+
+        xyz_lid       = lid_data[:, :, :3]
+        lid_intensity = lid_data[:, :, 3:4]            # keep if you want intensity in voxel feats
     else:
         xyz_lid = None
 
@@ -556,7 +568,10 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
     cams_T_velo = __u(utils.geom.safe_inverse(__p(velo_T_cams)))
 
     cam0_T_camXs = utils.geom.get_camM_T_camXs(velo_T_cams, ind=0)
-    rad_xyz_cam0 = utils.geom.apply_4x4(cams_T_velo[:, 0], xyz_rad)
+    # use the already-trimmed tensors; do not re-mask them again
+    rad_xyz_cam0 = utils.geom.apply_4x4(cams_T_velo[:, 0], xyz_rad)   # (B, R', 3)
+    # shallow_meta_rad already matches xyz_rad along dim=1
+
     if xyz_lid is not None:
         lid_xyz_cam0 = utils.geom.apply_4x4(cams_T_velo[:, 0], xyz_lid)
     else:
@@ -590,7 +605,28 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
 
     lid_occ_mem0 = None
     if use_lidar and lid_xyz_cam0 is not None:
-        lid_occ_mem0 = vox_util.voxelize_xyz(lid_xyz_cam0, Z, Y, X, assert_cube=False)
+        if use_lidar_encoder and lidar_encoder_type == 'voxel_net':
+            # use the intensity you already built from lid_data (trimmed to lid_keep!)
+            # shapes: lid_xyz_cam0 -> (B, N, 3), lid_intensity -> (B, N, 1)
+            assert lid_xyz_cam0.shape[0] == lid_intensity.shape[0] and lid_xyz_cam0.shape[1] == lid_intensity.shape[1], \
+                f"LIDAR xyz/feat mismatch: {lid_xyz_cam0.shape} vs {lid_intensity.shape}"
+
+            lid_vox_feats, lid_vox_coords, lid_num_vox = vox_util.voxelize_xyz_and_feats_voxelnet(
+                lid_xyz_cam0, lid_intensity, Z, Y, X,
+                assert_cube=False,
+                use_radar_occupancy_map=False,
+                clean_eps=0.0, 
+                max_voxels=60000)   # e.g., 60k for LiDAR
+
+            # keep batch dimension; the model expects a (features, coords, num_vox) tuple per batch
+            lid_occ_mem0 = (lid_vox_feats, lid_vox_coords, lid_num_vox)
+        else:
+            # occupancy path
+            lid_occ_mem0 = vox_util.voxelize_xyz(lid_xyz_cam0, Z, Y, X, assert_cube=False)
+    else:
+        lid_xyz_cam0 = None
+
+
 
     module = model.module if hasattr(model, "module") else model
     forward_params = inspect.signature(module.forward).parameters
@@ -771,7 +807,42 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
             wandb.log({'train/inputs/rad_occ_mem0': rad_occ_mem0_wandb}, commit=False)
 
         if use_lidar and lid_occ_mem0 is not None:
-            lid_occ_vis = sw.summ_occ('0_inputs/lid_occ_mem0', lid_occ_mem0)
+            # If we used the VoxelNet path, lid_occ_mem0 is a tuple:
+            # (voxel_features, voxel_coords, num_voxels). Build a dense occupancy for visualization.
+            if isinstance(lid_occ_mem0, tuple):
+                lid_vox_feats, lid_vox_coords, lid_num_vox = lid_occ_mem0
+                # Ensure a batch dim exists (sometimes squeeze(0) was applied when B=1)
+                if lid_vox_coords.dim() == 2:
+                    lid_vox_coords = lid_vox_coords.unsqueeze(0)
+                    lid_num_vox = lid_num_vox.unsqueeze(0)
+                B_vis = lid_vox_coords.shape[0]
+                # Create empty occupancy grid (B,1,Z,Y,X)
+                lid_occ_dense = torch.zeros((B_vis, 1, Z, Y, X), device=device)
+                for b in range(B_vis):
+                    k = int(lid_num_vox[b].item())
+                    if k > 0:
+                        inds = lid_vox_coords[b, :k].long()       # (k, 3) in (Z, Y, X)
+                        # Safety clamps (just in case)
+                        inds[:, 0].clamp_(0, Z - 1)
+                        inds[:, 1].clamp_(0, Y - 1)
+                        inds[:, 2].clamp_(0, X - 1)
+                        lid_occ_dense[b, 0, inds[:, 0], inds[:, 1], inds[:, 2]] = 1.0
+            else:
+                # Non-voxelnet path already produces a dense occupancy tensor
+                lid_occ_dense = lid_occ_mem0
+
+             # quick sanity: how many active voxels?
+            nonzero_vox = int(lid_occ_dense.sum().item())
+            wandb.log({'debug/lidar_nonzero_voxels': nonzero_vox}, commit=False)
+
+            # optional fallback view: if empty, render a direct occupancy from raw points to verify data flow
+            if nonzero_vox == 0 and lid_xyz_cam0 is not None:
+                lid_occ_direct = vox_util.voxelize_xyz(lid_xyz_cam0, Z, Y, X, assert_cube=False)
+                lid_direct_vis = sw.summ_occ('0_inputs/lid_occ_mem0_direct', lid_occ_direct)
+                lid_direct_vis = lid_direct_vis.squeeze().permute(1, 2, 0).numpy()
+                wandb.log({'train/inputs/lid_occ_mem0_direct': wandb.Image(lid_direct_vis)}, commit=False)
+
+            lid_occ_vis = sw.summ_occ('0_inputs/lid_occ_mem0', lid_occ_dense)
             lid_occ_vis = lid_occ_vis.squeeze().permute(1, 2, 0).numpy()
             wandb.log({'train/inputs/lid_occ_mem0': wandb.Image(lid_occ_vis)}, commit=False)
 
@@ -911,7 +982,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
 
 
 def main(
-        exp_name='bevcar_debug',
+        exp_name='bev_clr_ad_debug',
         # training
         max_iters=75000,
         log_freq=1000,
@@ -929,7 +1000,7 @@ def main(
         custom_dataroot='../../../nuscenes/scaled_images',
         log_dir='logs_nuscenes_bevcar',
         ckpt_dir='checkpoints/',
-        keep_latest=1,
+        keep_latest=75,
         init_dir='',
         ignore_load=None,
         load_step=False,
@@ -953,8 +1024,8 @@ def main(
         use_radar_encoder=False,
         use_metaradar=False,
         use_shallow_metadata=False,
-        use_lidar=False,
-        use_lidar_encoder=False,
+        use_lidar=True,
+        use_lidar_encoder=True,
         use_lidar_occupancy_map=False,
         use_pre_scaled_imgs=False,
         use_obj_layer_only_on_map=False,
@@ -1144,20 +1215,31 @@ def main(
     # Transformer based lifting and fusion
     if model_type == 'transformer':
         model = SegnetTransformerLiftFuse(Z_cam=Z, Y_cam=Y, X_cam=X, Z_rad=Z, Y_rad=Y, X_rad=X, vox_util=None,
-                                         use_radar=use_radar, use_metaradar=use_metaradar,
+                                         use_radar=use_radar,
+                                         use_metaradar=use_metaradar,
                                          use_shallow_metadata=use_shallow_metadata,
-                                         use_radar_encoder=use_radar_encoder, do_rgbcompress=do_rgbcompress,
-                                         encoder_type=encoder_type, radar_encoder_type=radar_encoder_type,
-                                          rand_flip=rand_flip, train_task=train_task,
-                                          init_query_with_image_feats=init_query_with_image_feats,
-                                          use_obj_layer_only_on_map=use_obj_layer_only_on_map,
-                                          do_feat_enc_dec=do_feat_enc_dec,
-                                          use_multi_scale_img_feats=use_multi_scale_img_feats, num_layers=num_layers,
-                                          latent_dim=128,
-                                          combine_feat_init_w_learned_q=combine_feat_init_w_learned_q,
-                                          use_rpn_radar=use_rpn_radar, use_radar_occupancy_map=use_radar_occupancy_map,
-                                          freeze_dino=freeze_dino, learnable_fuse_query=learnable_fuse_query,
-                                          use_lidar=use_lidar)
+                                         use_radar_encoder=use_radar_encoder,
+                                         do_rgbcompress=do_rgbcompress,
+                                         encoder_type=encoder_type,
+                                         radar_encoder_type=radar_encoder_type,
+                                         rand_flip=rand_flip,
+                                         train_task=train_task,
+                                         init_query_with_image_feats=init_query_with_image_feats,
+                                         use_obj_layer_only_on_map=use_obj_layer_only_on_map,
+                                         do_feat_enc_dec=do_feat_enc_dec,
+                                         use_multi_scale_img_feats=use_multi_scale_img_feats,
+                                         num_layers=num_layers,
+                                         latent_dim=128,
+                                         combine_feat_init_w_learned_q=combine_feat_init_w_learned_q,
+                                         use_rpn_radar=use_rpn_radar,
+                                         use_radar_occupancy_map=use_radar_occupancy_map,
+                                         freeze_dino=freeze_dino,
+                                         learnable_fuse_query=learnable_fuse_query,
+                                         use_lidar=use_lidar,
+                                         use_lidar_encoder=use_lidar_encoder,
+                                         lidar_encoder_type=lidar_encoder_type,                                
+                                         use_lidar_occupancy_map=use_lidar_occupancy_map,
+                                         )
 
     elif model_type == 'simple_lift_fuse':
         # our net with replaced lifting and fusion from SimpleBEV
@@ -1281,6 +1363,8 @@ def main(
                 use_shallow_metadata=use_shallow_metadata,
                 use_obj_layer_only_on_map=use_obj_layer_only_on_map,
                 use_lidar=use_lidar,
+                use_lidar_encoder=use_lidar_encoder,
+                lidar_encoder_type=lidar_encoder_type,
             )
 
             (total_loss_ / grad_acc).backward()

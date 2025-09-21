@@ -20,7 +20,7 @@ from nets.dino_v2_with_adapter.dino_v2_adapter.dinov2_adapter import (
 from nets.ops.modules import MSDeformAttn, MSDeformAttn3D
 from nets.voxelnet import VoxelNet
 
-torch.autograd.set_detect_anomaly(True)
+torch.autograd.set_detect_anomaly(False) # just for debugging purposes
 
 
 sys.path.append("..")
@@ -142,9 +142,11 @@ class UpsamplingAdd(nn.Module):
 
 class VanillaSelfAttention(nn.Module):
     # adapted from https://github.com/zhiqi-li/BEVFormer
-    def __init__(self, dim: int = 128, dropout: float = 0.1, vis_feats: bool = False):
+    def __init__(self, dim: int = 128, dropout: float = 0.1, vis_feats: bool = False,  Z: int = 200, X: int = 200):
         super(VanillaSelfAttention, self).__init__()
         self.dim = dim
+        self.Z = int(Z),
+        self.X = int(X),
         self.dropout = nn.Dropout(dropout)
         # Deform.DETR: n_heads=8 n_points=4
         self.deformable_attention = MSDeformAttn(d_model=dim, n_levels=1, n_heads=8, n_points=4)
@@ -160,7 +162,7 @@ class VanillaSelfAttention(nn.Module):
         inp_residual = query.clone()
         B, N, C = query.shape
 
-        Z, X = 200, 200
+        Z, X = int(self.Z[0]), int(self.X[0])
         # generate reference points in the BEV plane for spatial self-attention
         ref_z, ref_x = torch.meshgrid(
             torch.linspace(0.5, Z - 0.5, Z, dtype=torch.float, device=query.device),
@@ -173,7 +175,7 @@ class VanillaSelfAttention(nn.Module):
         reference_points = reference_points.repeat(B, 1, 1).unsqueeze(2)  # (B, N, 1, 2)
 
         if self.vis_feats:
-            reference_points_reshape = reference_points.reshape(1, 200, 200, 1, 2)
+            reference_points_reshape = reference_points.reshape(1, self.Z_cam, self.X_cam, 1, 2)
             reference_points_reshape_np = reference_points_reshape.detach().cpu().numpy()
             img = plt.imshow(reference_points_reshape_np[0, :, :, 0, 0])
             plt.savefig("reference_points_z.png")
@@ -188,7 +190,7 @@ class VanillaSelfAttention(nn.Module):
             plt.savefig("reference_points.png")
 
         input_spatial_shapes = query.new_zeros([1, 2]).long()
-        input_spatial_shapes[:] = 200
+        input_spatial_shapes[:] = query.new_tensor([[Z, X]], dtype=torch.long)  # (num_levels=1, 2)
         input_level_start_index = query.new_zeros([1, ]).long()
         queries = self.deformable_attention(query, reference_points, query.clone(),
                                             input_spatial_shapes, input_level_start_index)
@@ -290,9 +292,11 @@ class FusingCrossAttentionV2(nn.Module):
     utilizes deformable attention to fuse camera- and radar BEV embeddings
     """
 
-    def __init__(self, dim: int = 128, dropout: float = 0.1):
+    def __init__(self, dim: int = 128, dropout: float = 0.1, Z: int = 200, X: int = 200):
         super(FusingCrossAttentionV2, self).__init__()
         self.dim = dim
+        self.Z = int(Z),
+        self.X = int(X),
         self.dropout = nn.Dropout(dropout)
         # Deform.DETR: n_heads=8 n_points=4
         self.fusing_deformable_attention = MSDeformAttn(d_model=dim, n_levels=1, n_heads=8, n_points=4)
@@ -314,7 +318,9 @@ class FusingCrossAttentionV2(nn.Module):
             query = query + query_pos
 
         B, N, C = query.shape
-        Z, X = 200, 200
+        Z, X = int(self.Z[0]), int(self.X[0])
+         #sanity check that the token count matches Z*X
+        assert N == Z * X, f"Query length {N} != Z*X ({Z}*{X})"
         ref_z, ref_x = torch.meshgrid(
             torch.linspace(0.5, Z - 0.5, Z, dtype=torch.float, device=query.device),
             torch.linspace(0.5, X - 0.5, X, dtype=torch.float, device=query.device),
@@ -325,8 +331,8 @@ class FusingCrossAttentionV2(nn.Module):
         reference_points = torch.stack((ref_z, ref_x), -1)
         reference_points = reference_points.repeat(B, 1, 1).unsqueeze(2)  # (B, N, 1, 2)
 
-        input_spatial_shapes = query.new_zeros([1, 2]).long()
-        input_spatial_shapes[:] = 200
+        #(num_levels=1, 2) as [H, W] where H=Z, W=X; long dtype required
+        input_spatial_shapes = torch.tensor([[Z, X]], device=query.device, dtype=torch.long)
         input_level_start_index = query.new_zeros([1, ]).long()
         queries = self.fusing_deformable_attention(query, reference_points, input_feats,
                                                    input_spatial_shapes, input_level_start_index)
@@ -659,15 +665,15 @@ class SegnetTransformerLiftFuse(nn.Module):
                  use_radar_as_k_v: bool = False,
                  combine_feat_init_w_learned_q: bool = False,
                  use_rpn_radar: bool = False,
-                use_radar_occupancy_map: bool = False,
-                use_lidar: bool = False,
-                use_lidar_encoder: bool = False,
-                lidar_encoder_type: str = "voxel_net",
-                use_rpn_lidar: bool = False,
-                use_lidar_occupancy_map: bool = False,
-                freeze_dino: bool = True,
-                learnable_fuse_query: bool = False,
-                is_master: bool = False):
+                 use_radar_occupancy_map: bool = False,
+                 use_lidar: bool = True,
+                 use_lidar_encoder: bool = True,
+                 lidar_encoder_type: str = "voxel_net",
+                 use_rpn_lidar: bool = False,
+                 use_lidar_occupancy_map: bool = False,
+                 freeze_dino: bool = True,
+                 learnable_fuse_query: bool = False,
+                 is_master: bool = False):
         super(SegnetTransformerLiftFuse, self).__init__()
         assert (encoder_type in ["res101", "res50", "dino_v2", "vit_s"])
         assert (radar_encoder_type in ["voxel_net", None])
@@ -757,10 +763,16 @@ class SegnetTransformerLiftFuse(nn.Module):
         if self.use_radar_encoder and self.use_radar:
             if self.radar_encoder_type == "voxel_net":
                 # if reduced_zx==True -> 100x100 instead of 200x200
-                # if use_col=True: added RPN after CML -->  in our case RPN lead to worse performance
-                self.radar_encoder = VoxelNet(use_col=self.use_rpn_radar, reduced_zx=False,
-                                              output_dim=latent_dim,
-                                              use_radar_occupancy_map=self.use_radar_occupancy_map)
+                # if use_col=True: added RPN after CML --> in our case RPN led to worse performance
+                self.radar_encoder = VoxelNet(
+                    use_col=self.use_rpn_radar,
+                    reduced_zx=False,
+                    output_dim=latent_dim,
+                    use_radar_occupancy_map=self.use_radar_occupancy_map,
+                    Z=self.Z_rad, Y=self.Y_rad, X=self.X_rad,   # optional
+                    # per-point features for Radar: x,y,z + (vx, vy, rcs)
+                    point_feature_dim=6,
+                )
             else:
                 print("Radar encoder not found ")
         elif not self.use_radar_encoder and self.use_radar and self.is_master:
@@ -771,7 +783,6 @@ class SegnetTransformerLiftFuse(nn.Module):
 
         # LiDAR Encoder
 
-        # --- LiDAR occupancy compressor (Solution A) ---
         # If LiDAR is enabled but NO LiDAR encoder is used, compress occupancy (B,1,Z,Y,X) into (B,C,Z,X).
         if self.use_lidar and not self.use_lidar_encoder:
             self.lidar_occ_compressor = nn.Sequential(
@@ -783,11 +794,15 @@ class SegnetTransformerLiftFuse(nn.Module):
         if self.use_lidar_encoder and self.use_lidar:
             if self.lidar_encoder_type == "voxel_net":
                 # if reduced_zx==True -> 100x100 instead of 200x200
-                self.lidar_encoder = VoxelNet(
+                 self.lidar_encoder = VoxelNet(
                     use_col=self.use_rpn_lidar,
                     reduced_zx=False,
                     output_dim=latent_dim,
                     use_radar_occupancy_map=self.use_lidar_occupancy_map,
+                    # grid dims (optional but safer if they differ from defaults)
+                    Z=self.Z_cam, Y=self.Y_cam, X=self.X_cam,
+                    # per-point features for LiDAR: x,y,z + intensity
+                    point_feature_dim=4,
                 )
             else:
                 print("LiDAR encoder not found ")
@@ -799,7 +814,7 @@ class SegnetTransformerLiftFuse(nn.Module):
 
         if self.use_radar and self.use_lidar:
             # cross-attention module to fuse radar and LiDAR before camera fusion
-            self.radar_lidar_attention = FusingCrossAttentionV2(dim=latent_dim)
+            self.radar_lidar_attention = FusingCrossAttentionV2(dim=latent_dim, Z=self.Z_rad, X=self.X_rad)
 
         # image BEV 3D feature volume compressor:
         if self.init_query_with_image_feats:
@@ -810,7 +825,7 @@ class SegnetTransformerLiftFuse(nn.Module):
             )
 
             if self.use_radar or self.use_lidar:
-                self.image_based_query_attention = FusingCrossAttentionV2(dim=latent_dim)
+                self.image_based_query_attention = FusingCrossAttentionV2(dim=latent_dim, Z=self.Z_cam, X=self.X_cam)
 
         # init queries
         self.bev_queries = nn.Parameter(0.1 * torch.randn(latent_dim, Z_cam, X_cam).float(), requires_grad=True)
@@ -823,7 +838,7 @@ class SegnetTransformerLiftFuse(nn.Module):
             num_levels = 1
 
         self.self_attn_layers_encoder = nn.ModuleList([
-            VanillaSelfAttention(dim=latent_dim) for _ in range(num_layers)
+            VanillaSelfAttention(dim=latent_dim, Z=self.Z_cam, X=self.X_cam) for _ in range(num_layers)
         ])  # deformable self attention
         self.norm1_layers_encoder = nn.ModuleList([
             nn.LayerNorm(latent_dim) for _ in range(num_layers)
@@ -850,13 +865,13 @@ class SegnetTransformerLiftFuse(nn.Module):
             self.bev_queries_fuse_pos = nn.Parameter(0.1 * torch.randn(latent_dim, Z_cam, X_cam).float(),
                                                      requires_grad=True)  # C, Z, X
             self.self_attn_layers_fuser = nn.ModuleList([
-                VanillaSelfAttention(dim=latent_dim) for _ in range(num_layers)
+                VanillaSelfAttention(dim=latent_dim, Z=self.Z_cam, X=self.X_cam) for _ in range(num_layers)
             ])  # deformable self attention
             self.norm1_layers_fuser = nn.ModuleList([
                 nn.LayerNorm(latent_dim) for _ in range(num_layers)
             ])
             self.fusing_attn_layers_fuser = nn.ModuleList([
-                FusingCrossAttentionV2(dim=latent_dim) for _ in range(num_layers)
+                FusingCrossAttentionV2(dim=latent_dim, Z=self.Z_cam, X=self.X_cam) for _ in range(num_layers)
             ])
             self.norm2_layers_fuser = nn.ModuleList([
                 nn.LayerNorm(latent_dim) for _ in range(num_layers)
@@ -1106,7 +1121,7 @@ class SegnetTransformerLiftFuse(nn.Module):
                         print('LiDAR encoder type not supported')
                     lid_bev_ = torch.zeros((B, self.latent_dim, self.Z_rad, self.X_rad), device=device)
             else:
-                # Solution A: LiDAR occupancy -> lightweight compressor
+                # LiDAR occupancy -> lightweight compressor
                 # lidar_occ_mem0: (B, 1, Z, Y, X)
                 assert lidar_occ_mem0.ndim == 5, "Expected (B,1,Z,Y,X) for LiDAR occupancy"
                 assert lidar_occ_mem0.shape[2] == self.Z_cam and \

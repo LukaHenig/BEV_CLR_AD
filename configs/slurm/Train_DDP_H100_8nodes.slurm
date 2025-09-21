@@ -1,25 +1,38 @@
 #!/bin/bash
-#SBATCH --partition=gpu8            # oder passender GPU-Partitionname
-#SBATCH --gres=gpu:h100:8
-#SBATCH --time=48:00:00
+#SBATCH --job-name=bev_ddp
+#SBATCH --partition=gpu8
 #SBATCH --nodes=1
-#SBATCH --ntasks=96                   # 1 Task pro GPU
-#SBATCH --mem=1400G
+#SBATCH --ntasks=1                 # ONE task; torchrun will fork 8 workers
+#SBATCH --gpus-per-node=8          # or: --gres=gpu:h100:8   (pick one, not both)
+#SBATCH --cpus-per-task=16         # CPU cores for the *single* launcher task
+#SBATCH --time=48:00:00
+#SBATCH --mem=0                    # let Slurm give full node mem; or set e.g. 512G
 #SBATCH --output=logs_train/DDP_H100/%x_%j.out
-#SBATCH --job-name=bev_clr_ad_train_ddp
 
-# Lade Module oder aktiviere Umgebung
-#source ~/.bashrc
-#conda activate bev_clr_ad
+# always start in the submit dir
+cd "$SLURM_SUBMIT_DIR"
 
-
-########### Irgendwie läuft es nicht mehr, muss man noch mal analysieren 
-
-
-# Training starten
+# env (no manual CUDA_VISIBLE_DEVICES)
 export OMP_NUM_THREADS=16
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+unset CUDA_VISIBLE_DEVICES
+export PYTHONUNBUFFERED=1
+export NCCL_DEBUG=INFO
+export NCCL_IB_DISABLE=1           # single-node only
 export WANDB__SERVICE_WAIT=300
 
-torchrun --nproc_per_node=8 --nnodes=1 --master_port=12345 \
-  train.py --config='configs/train/train_bev_clr_ad.yaml'
+# quick sanity (shows up in your log file)
+echo "== Host $(hostname) =="
+nvidia-smi -L
+python - <<'PY'
+import os, torch
+print("CUDA_VISIBLE_DEVICES =", os.environ.get("CUDA_VISIBLE_DEVICES"))
+print("cuda.is_available    =", torch.cuda.is_available())
+print("device_count         =", torch.cuda.device_count())
+print("torch                =", torch.__version__)
+print("torch.version.cuda   =", torch.version.cuda)
+PY
+
+# launch (torchrun creates 8 local worker processes)
+srun --ntasks=1 --gpus=8 --cpu-bind=cores \
+     bash -lc "torchrun --standalone --nproc_per_node=8 \
+       train_ddp.py --config configs/train/train_bev_clr_ad.yaml"

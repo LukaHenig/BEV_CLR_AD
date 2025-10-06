@@ -11,12 +11,12 @@ log_freq: 100                    # How often to log scalars/images to TensorBoar
 shuffle: true                    # Shuffle training samples each epoch (affects dataloader).
 dset: 'trainval'                 # Dataset split to load in nuscenes_data.compile_data (e.g., 'train', 'trainval', 'mini').
 save_freq: 1000                  # Save a checkpoint every N steps.
-batch_size: 8                    # Per-step mini-batch size (must be divisible by len(device_ids) if using DataParallel).
-grad_acc: 5                      # Gradient accumulation steps. Effective batch size = batch_size * grad_acc.
+batch_size: 1                    # Per-step mini-batch size (must be divisible by len(device_ids) if using DataParallel).
+grad_acc: 1                      # Gradient accumulation steps. Effective batch size = batch_size * grad_acc.
 lr: 0.0003                       # Peak LR for OneCycleLR (if use_scheduler=true); base LR for constant schedule otherwise.
 use_scheduler: true              # Use OneCycleLR schedule (warms up then anneals).
 weight_decay: 0.0000001          # Adam/AdamW weight decay (L2 regularization).
-nworkers: 8                      # DataLoader workers (increase until I/O saturates but avoid fork issues on your system).
+nworkers: 16                     # DataLoader workers (increase until I/O saturates but avoid fork issues on your system).
 
 # ======================
 # Directories
@@ -42,8 +42,8 @@ rand_flip: false                 # Random horizontal/vertical flips for images/B
 rand_crop_and_resize: false      # If true, use random resize + crop in the dataloader (resize_lim controls range).
 ncams: 6                         # Number of cameras per sample (nuScenes uses 6).
 nsweeps: 5                       # Number of RADAR sweeps to aggregate per sample (passed to the loader).
-lidar_nsweeps: 5                 # Number of LiDAR sweeps to aggregate per sample (used when use_lidar=true).
-grid_dim: [100, 8, 100]          # Voxel grid (Z, Y, X). Y is vertical bins; BEV plane is Z (forward) × X (right).
+lidar_nsweeps: 1                 # Number of LiDAR sweeps to aggregate per sample (used when use_lidar=true).
+grid_dim: [400, 16, 400]          # Voxel grid (Z, Y, X). Y is vertical bins; BEV plane is Z (forward) × X (right).
 
 # ======================
 # Core task selection
@@ -86,7 +86,7 @@ use_lidar_occupancy_map: false   # If true (and encoder supports), provide a 1-c
 # ======================
 # Misc / model plumbing
 # ======================
-device_ids: [0,1,2,3,4,5,6,7]                  # GPU ids used by torch.nn.DataParallel. batch_size must be divisible by len(device_ids).
+device_ids: [0]                  # GPU ids used by torch.nn.DataParallel. batch_size must be divisible by len(device_ids).
 freeze_dino: true                # Freeze DINO-V2 backbone (saves memory & stabilizes; unfreeze to fine-tune at a cost).
 do_feat_enc_dec: true            # Apply BEV feature encoder–decoder refinement (ResNet18-like with skips) after fusion.
 combine_feat_init_w_learned_q: true

@@ -1,48 +1,69 @@
-# model name
-exp_name: 'BEVCar'
+# ======================
+# Model / experiment name
+# ======================
+exp_name: 'BEV_CLR_AD'           # Match training experiment naming for consistent logging/checkpoint discovery.
 
-# Eval parameters
-log_freq: 100
-shuffle: false
-dset: 'trainval'
-batch_size: 1  # keep it at 1 for the moment
-nworkers: 8
-do_drn_val_split: true
+# ======================
+# Evaluation parameters
+# ======================
+log_freq: 100                    # Logging cadence (steps) for evaluation metrics/images.
+shuffle: false                   # Keep deterministic ordering for evaluation.
+dset: 'trainval'                 # Evaluate on the trainval split to mirror training data coverage.
+batch_size: 1                    # Evaluation uses batch size 1 (DataParallel still splits across device_ids).
+nworkers: 16                     # DataLoader workers; align with training unless resources require fewer.
+do_drn_val_split: true           # Also report metrics per day/rain/night subsets.
 
+# ======================
 # Directories
-data_dir: '/../../../../../../beegfs/scratch/workspace/es_luheit04-NuSceneDataset/nuscenes'
+# ======================
+data_dir: '/../../../../../../beegfs/scratch/workspace/es_luheit04-NuScneDataset_new/es_luheit04-NuSceneDataset-1756172124/nuscenes'
+                                 # Root of nuScenes (must contain 'samples', 'sweeps', 'maps', etc.).
 custom_dataroot: 'datasets/scaled_images'
-log_dir: 'logs_nuscenes'
-init_dir: 'model_checkpoints/BEVCar'
-ignore_load: null
-load_step: 50000
+                                 # Optional pre-scaled images root used when use_pre_scaled_imgs=true.
+log_dir: 'logs_nuscenes'         # TensorBoard/TensorboardX evaluation log root.
+init_dir: 'model_checkpoints/BEV_CLR_AD'
+                                 # Directory containing the checkpoint to evaluate.
+ignore_load: null                # Optional list/pattern of keys to ignore when loading the checkpoint.
+load_step: 50000                 # Specific training step checkpoint to load (set to null to load latest).
 
+# ======================
 # Data parameters
-final_dim: [448, 896]  # to match //8, //14, //16 and //32 in Vit
-ncams: 6
-nsweeps: 5
+# ======================
+final_dim: [448, 896]            # (H, W) image size after processing; matches the training configuration.
+ncams: 6                         # Number of cameras per sample (nuScenes uses 6).
+nsweeps: 5                       # Number of RADAR sweeps aggregated per sample.
+lidar_nsweeps: 1                 # Number of LiDAR sweeps aggregated per sample (matches training pipeline).
 
+# ======================
 # Model parameters
-encoder_type: 'dino_v2'
-radar_encoder_type: 'voxel_net'
-use_rpn_radar: false
-train_task: 'both'
-use_radar: true
-use_radar_filters: false
-use_radar_encoder: true
-use_metaradar: false
-use_shallow_metadata: true
-use_pre_scaled_imgs: false
-use_obj_layer_only_on_map: true
+# ======================
+encoder_type: 'dino_v2'          # Image backbone: 'dino_v2' (ViT-B/14 adapter).
+radar_encoder_type: 'voxel_net'  # RADAR BEV encoder: currently 'voxel_net' (sparse voxel feature net).
+use_rpn_radar: false             # Keep RPN disabled as in training.
+train_task: 'both'               # Shared decoder for objects and semantic map tasks.
+use_radar: true                  # Enable RADAR branch during inference.
+use_radar_filters: true          # Apply classical radar filtering to mirror training preprocessing.
+use_radar_encoder: true          # Expect (features, coords, num_voxels) tuple and run VoxelNet.
+use_radar_occupancy_map: false   # Do not swap to occupancy-map-based radar encoding.
+use_metaradar: false             # Disable handcrafted radar meta features (not used with VoxelNet tuple).
+use_shallow_metadata: true       # Enable lightweight radar metadata features.
+use_lidar: true                  # Enable LiDAR branch to match training setup.
+use_pre_scaled_imgs: false       # Read full-resolution images and resize/augment on-the-fly.
+use_obj_layer_only_on_map: true  # Map head predicts 7 classes; object head predicts the vehicle layer.
 init_query_with_image_feats: true
-do_rgbcompress: true
-use_multi_scale_img_feats: true
-num_layers: 6
+                                 # Initialize BEV queries using lifted multi-view image features.
+do_rgbcompress: true             # Apply minor convolutional compression on 2D features.
+use_multi_scale_img_feats: true  # Use 4/8/16/32 features as keys for cross-attention (richer, heavier).
+num_layers: 6                    # Number of transformer encoder & fuser blocks (stacked).
 
-device_ids: [0]
-freeze_dino: true
-do_feat_enc_dec: true
+# ======================
+# Misc / model plumbing
+# ======================
+device_ids: [0]                  # GPU ids used by torch.nn.DataParallel.
+freeze_dino: true                # Freeze DINO-V2 backbone (consistent with training).
+do_feat_enc_dec: true            # Apply BEV feature encoder–decoder refinement after fusion.
 combine_feat_init_w_learned_q: true
-model_type: 'transformer'
-use_radar_occupancy_map: false
-learnable_fuse_query: true
+                                 # Sum image-initialized queries with learned BEV queries + positional encodings.
+model_type: 'transformer'        # Transformer-based lifting/fusion model.
+learnable_fuse_query: true       # Include learned fusion query to stabilize radar/lidar fusion.
+

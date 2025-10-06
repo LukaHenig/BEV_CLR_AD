@@ -689,6 +689,8 @@ class SegnetTransformerLiftFuse(nn.Module):
         self.do_rgbcompress = do_rgbcompress
         self.rand_flip = rand_flip
         self.latent_dim = latent_dim
+        self.rad_ch_proj = nn.Identity()
+        self.lid_ch_proj = nn.Identity()
         self.encoder_type = encoder_type
         self.radar_encoder_type = radar_encoder_type
         self.train_task = train_task
@@ -762,15 +764,12 @@ class SegnetTransformerLiftFuse(nn.Module):
         # Radar Encoder
         if self.use_radar_encoder and self.use_radar:
             if self.radar_encoder_type == "voxel_net":
-                # if reduced_zx==True -> 100x100 instead of 200x200
-                # if use_col=True: added RPN after CML --> in our case RPN led to worse performance
                 self.radar_encoder = VoxelNet(
                     use_col=self.use_rpn_radar,
                     reduced_zx=False,
                     output_dim=latent_dim,
                     use_radar_occupancy_map=self.use_radar_occupancy_map,
-                    Z=self.Z_rad, Y=self.Y_rad, X=self.X_rad,   # optional
-                    # per-point features for Radar: x,y,z + (vx, vy, rcs)
+                    Z=self.Z_rad, Y=self.Y_rad, X=self.X_rad,
                     point_feature_dim=6,
                 )
             else:
@@ -793,15 +792,12 @@ class SegnetTransformerLiftFuse(nn.Module):
 
         if self.use_lidar_encoder and self.use_lidar:
             if self.lidar_encoder_type == "voxel_net":
-                # if reduced_zx==True -> 100x100 instead of 200x200
-                 self.lidar_encoder = VoxelNet(
+                self.lidar_encoder = VoxelNet(
                     use_col=self.use_rpn_lidar,
                     reduced_zx=False,
                     output_dim=latent_dim,
                     use_radar_occupancy_map=self.use_lidar_occupancy_map,
-                    # grid dims (optional but safer if they differ from defaults)
-                    Z=self.Z_cam, Y=self.Y_cam, X=self.X_cam,
-                    # per-point features for LiDAR: x,y,z + intensity
+                    Z=self.Z_cam, Y=self.Y_cam, X=self.X_cam,  # keep as you had it
                     point_feature_dim=4,
                 )
             else:
@@ -811,6 +807,28 @@ class SegnetTransformerLiftFuse(nn.Module):
         else:
             if self.is_master and not self.use_radar:
                 print("#############    CAM ONLY    ##############")
+
+        # --- NEW: channel adapters (1x1 conv tails) ---
+
+        self.rad_ch_proj = nn.Identity()
+        self.lid_ch_proj = nn.Identity()
+
+        if self.use_radar:
+            in_ch = 64 * (self.Z_rad // 2)  # 6400 or 12800
+            # if you ever set use_col=True, set rad_ch_proj = Identity instead
+            self.rad_ch_proj = nn.Sequential(
+                nn.Conv2d(in_ch, self.latent_dim, kernel_size=1, bias=False),
+                nn.InstanceNorm2d(self.latent_dim),
+                nn.GELU(),
+            )
+
+        if self.use_lidar and self.use_lidar_encoder:
+            in_ch = 64 * (self.Z_cam // 2)
+            self.lid_ch_proj = nn.Sequential(
+                nn.Conv2d(in_ch, self.latent_dim, kernel_size=1, bias=False),
+                nn.InstanceNorm2d(self.latent_dim),
+                nn.GELU(),
+            )
 
         if self.use_radar and self.use_lidar:
             # cross-attention module to fuse radar and LiDAR before camera fusion
@@ -1131,6 +1149,26 @@ class SegnetTransformerLiftFuse(nn.Module):
                 occ = lidar_occ_mem0.squeeze(1)            # (B, Z, Y, X)
                 occ = occ.permute(0, 2, 1, 3).contiguous() # (B, Y, Z, X) -> treat Y as channels
                 lid_bev_ = self.lidar_occ_compressor(occ)  # (B, latent_dim, Z, X)
+        
+        if self.use_radar:
+            rad_bev_ = self.rad_ch_proj(rad_bev_)      # -> [B, latent_dim, Z, X]
+
+        if self.use_lidar:
+            if self.use_lidar_encoder:
+                lid_bev_ = self.lid_ch_proj(lid_bev_)  # -> [B, latent_dim, Z, X]
+            else:
+                # lid_bev_ already comes from lidar_occ_compressor with latent_dim channels
+                pass
+
+        # After computing rad_bev_ / lid_bev_
+        B = rad_bev_.shape[0] if isinstance(rad_bev_, torch.Tensor) else B
+        if self.use_radar:
+            assert rad_bev_.shape[1] == self.latent_dim, \
+                f"rad_bev_ channels {rad_bev_.shape[1]} != latent_dim {self.latent_dim}; " \
+                f"this will inflate N when reshaping to (B, -1, latent_dim)"
+        if self.use_lidar:
+            assert lid_bev_.shape[1] == self.latent_dim, \
+                f"lid_bev_ channels {lid_bev_.shape[1]} != latent_dim {self.latent_dim}"
 
         # fuse radar and LiDAR features via cross-attention
         if self.use_radar and self.use_lidar:

@@ -21,10 +21,10 @@ data_dir: '/../../../../../../beegfs/scratch/workspace/es_luheit04-NuScneDataset
 custom_dataroot: 'datasets/scaled_images'
                                  # Optional pre-scaled images root used when use_pre_scaled_imgs=true.
 log_dir: 'logs_nuscenes'         # TensorBoard/TensorboardX evaluation log root.
-init_dir: 'model_checkpoints/BEV_CLR_AD'
+init_dir: 'model_checkpoints/BEV_CLR_AD_1x5_3e-4s_09-41-19'
                                  # Directory containing the checkpoint to evaluate.
 ignore_load: null                # Optional list/pattern of keys to ignore when loading the checkpoint.
-load_step: 50000                 # Specific training step checkpoint to load (set to null to load latest).
+load_step: 14000                 # Specific training step checkpoint to load (set to null to load latest).
 
 # ======================
 # Data parameters

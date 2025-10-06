@@ -1272,16 +1272,43 @@ def main(
         optimizer = torch.optim.Adam(parameters, lr=lr, weight_decay=weight_decay)
         scheduler = None
 
-    # Counting trainable parameters
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f'Trainable parameters: {trainable_params}')
-    # Counting non-trainable parameters
-    non_trainable_params = sum(p.numel() for p in model.parameters() if not p.requires_grad)
-    print(f'Non-trainable parameters: {non_trainable_params}')
-    # Overall parameters
-    total_params = trainable_params + non_trainable_params
-    print('Total parameters (trainable + fixed)', total_params)
+    # --- Warm up Lazy modules BEFORE counting params ---
+    #model.eval()
+    #with torch.no_grad():
+    #    # get one batch from your train loader
+    #    sample = next(iter(train_loader))
+#
+    #    # move tensors to the same device as the model
+    #    device = next(model.parameters()).device
+    #    def to_device(x):
+    #        if torch.is_tensor(x):
+    #            return x.to(device, non_blocking=True)
+    #        if isinstance(x, (list, tuple)):
+    #            return type(x)(to_device(t) for t in x)
+    #        if isinstance(x, dict):
+    #            return {k: to_device(v) for k, v in x.items()}
+    #        return x
+#
+    #    sample = to_device(sample)
+#
+    #    # call the model exactly like in training
+    #    try:
+    #        _ = model(**sample)   # if your forward expects keyworded batch (common)
+    #    except TypeError:
+    #        _ = model(sample)     # fallback if your forward takes a single dict/tuple
+#
+    #model.train()
+    ## --- Now it's safe to count params ---
+    #trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    #print(f'Trainable parameters: {trainable_params}')
+#
+    #non_trainable_params = sum(p.numel() for p in model.parameters() if not p.requires_grad)
+    #print(f'Non-trainable parameters: {non_trainable_params}')
+#
+    #total_params = trainable_params + non_trainable_params
+    #print('Total parameters (trainable + fixed)', total_params)
 
+    
     # wandb setup watcher
     wandb.watch(model, log_freq=log_freq)
 

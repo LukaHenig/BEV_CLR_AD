@@ -481,25 +481,17 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
     lid_occ_mem0 = None
     if use_lidar and lid_xyz_cam0 is not None:
         if use_lidar_encoder and lidar_encoder_type == 'voxel_net':
-<<<<<<< HEAD
             # Grundvoraussetzungen: Intensitäten müssen zur XYZ-Form passen
             assert lid_intensity is not None, "LiDAR intensity features required for voxel encoder"
             assert lid_xyz_cam0.shape[:2] == lid_intensity.shape[:2], \
                 f"LiDAR xyz/feat mismatch: {lid_xyz_cam0.shape} vs {lid_intensity.shape}"
     
             # Voxelize für voxel_net: erwartet Tuple (features, coords, num_vox)
-=======
-            assert lid_intensity is not None, "LiDAR intensity features required for voxel encoder"
-            assert lid_xyz_cam0.shape[:2] == lid_intensity.shape[:2], \
-                f"LiDAR xyz/feat mismatch: {lid_xyz_cam0.shape} vs {lid_intensity.shape}"
-
->>>>>>> 357d1ea3d6a949133e5450e885b1e88be0d2b18f
             lid_vox_feats, lid_vox_coords, lid_num_vox = vox_util.voxelize_xyz_and_feats_voxelnet(
                 lid_xyz_cam0, lid_intensity, Z, Y, X,
                 assert_cube=False,
                 use_radar_occupancy_map=False,
                 clean_eps=0.0,
-<<<<<<< HEAD
                 max_voxels=60000
             )
             lid_occ_mem0 = (lid_vox_feats, lid_vox_coords, lid_num_vox)
@@ -533,13 +525,6 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
                     f"LiDAR occupancy must be (B,1,Z,Y,X); got shape {tuple(lid_occ_mem0.shape)}"
                 print(f"[EVAL] LiDAR occupancy shape: {tuple(lid_occ_mem0.shape)}")
     
-=======
-                max_voxels=60000)
-
-            lid_occ_mem0 = (lid_vox_feats, lid_vox_coords, lid_num_vox)
-        else:
-            lid_occ_mem0 = vox_util.voxelize_xyz(lid_xyz_cam0, Z, Y, X, assert_cube=False)
->>>>>>> 357d1ea3d6a949133e5450e885b1e88be0d2b18f
 
     start_inference_t = time.time()  # optional: pure inference timing
     module = model.module if hasattr(model, "module") else model
@@ -751,13 +736,8 @@ def main(
         use_radar_filters=False,
         use_metaradar=False,
         use_shallow_metadata=False,
-<<<<<<< HEAD
         use_lidar=True,
         use_lidar_encoder=True,
-=======
-        use_lidar=False,
-        use_lidar_encoder=False,
->>>>>>> 357d1ea3d6a949133e5450e885b1e88be0d2b18f
         use_lidar_occupancy_map=False,
         use_pre_scaled_imgs=True,
         use_obj_layer_only_on_map=False,
@@ -881,29 +861,6 @@ def main(
                                           lidar_encoder_type=lidar_encoder_type,
                                           use_lidar_occupancy_map=use_lidar_occupancy_map)
 
-<<<<<<< HEAD
-=======
-    elif model_type == 'simple_lift_fuse':
-        # our net with replaced lifting and fusion from SimpleBEV
-        model = SegnetSimpleLiftFuse(Z_cam=Z, Y_cam=Y, X_cam=X, Z_rad=Z, Y_rad=Y, X_rad=X, vox_util=None,
-                                     use_radar=use_radar, use_metaradar=use_metaradar,
-                                     use_shallow_metadata=use_shallow_metadata, use_radar_encoder=use_radar_encoder,
-                                     do_rgbcompress=do_rgbcompress, encoder_type=encoder_type,
-                                     radar_encoder_type=radar_encoder_type, rand_flip=False, train_task=train_task,
-                                     use_obj_layer_only_on_map=use_obj_layer_only_on_map,
-                                     do_feat_enc_dec=do_feat_enc_dec,
-                                     use_multi_scale_img_feats=use_multi_scale_img_feats, num_layers=num_layers,
-                                     latent_dim=128, use_rpn_radar=use_rpn_radar,
-                                     use_radar_occupancy_map=use_radar_occupancy_map,
-                                     use_lidar=use_lidar,
-                                     freeze_dino=freeze_dino)
-
-    else:  # model_type == 'SimpleBEV_map'
-        model = SegnetWithMap(Z, Y, X, vox_util=vox_util, use_radar=use_radar,
-                              use_metaradar=use_metaradar, use_shallow_metadata=use_shallow_metadata,
-                              do_rgbcompress=do_rgbcompress, encoder_type=encoder_type, rand_flip=False,
-                              train_task=train_task, freeze_dino=freeze_dino)
->>>>>>> 357d1ea3d6a949133e5450e885b1e88be0d2b18f
 
     model = model.to(device)
     model = torch.nn.DataParallel(model, device_ids=device_ids)

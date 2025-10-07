@@ -120,12 +120,19 @@ def test_convert_egopose_to_matrix_numpy_returns_valid_homogeneous_matrix(nuscen
 def test_camera_coordinate_transforms_are_inverses(nuscenes_data_module):
     module = nuscenes_data_module
 
-    points = torch.tensor([[0.0, 1.0, 2.0], [0.0, 1.0, 2.0], [5.0, 5.0, 5.0]])
+    # Points are expressed as 3 x N where columns are XYZ locations in the ego frame
+    points = torch.tensor(
+        [
+            [0.0, 1.0, 2.0],
+            [0.0, 1.0, 2.0],
+            [5.0, 5.0, 5.0],
+        ]
+    )
     rot = torch.eye(3)
     trans = torch.zeros(3)
     intrins = torch.eye(3)
 
-    cam_points = module.ego_to_cam(points.clone(), rot, trans)
+    cam_points = module.ego_to_cam(points.clone(), rot, trans, intrins)
     recovered = module.cam_to_ego(cam_points, rot, trans, intrins)
 
     assert torch.allclose(recovered, points, atol=1e-4)

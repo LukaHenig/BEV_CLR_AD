@@ -74,7 +74,9 @@ def test_set_bn_momentum_updates_instance_norm_layers(segnet_module):
 
 def test_upsampling_concat_preserves_spatial_dimensions(segnet_module):
     module = segnet_module
-    block = module.UpsamplingConcat(in_channels=6, out_channels=4, scale_factor=2)
+    # The module expects ``in_channels`` to match the concatenated channel dimension
+    # (channels of ``skip`` plus channels of the upsampled tensor).
+    block = module.UpsamplingConcat(in_channels=12, out_channels=4, scale_factor=2)
 
     x_to_upsample = torch.randn(1, 6, 8, 8)
     skip = torch.randn(1, 6, 16, 16)

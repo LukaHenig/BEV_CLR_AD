@@ -16,7 +16,8 @@ def test_update_metrics_accumulates_and_computes_iou():
 
     assert torch.equal(metrics["example_intersections"], torch.tensor(5.0))
     assert torch.equal(metrics["example_unions"], torch.tensor(9.0))
-    assert torch.allclose(metrics["example_iou"], torch.tensor(100 * 5.0 / 9.0))
+    expected_iou = 100 * 5.0 / (9.0 + 1e-4)
+    assert torch.allclose(metrics["example_iou"], torch.tensor(expected_iou))
 
 
 def test_update_range_metrics_iterates_over_ranges():
@@ -45,7 +46,8 @@ def test_update_range_metrics_iterates_over_ranges():
 
     assert torch.equal(base_metrics["obj_0_20_intersections"], torch.tensor(1.0))
     assert torch.equal(base_metrics["obj_20_35_unions"], torch.tensor(4.0))
-    assert torch.allclose(base_metrics["obj_35_50_iou"], torch.tensor(100 * 5.0 / 6.0))
+    expected_iou = 100 * 5.0 / (6.0 + 1e-4)
+    assert torch.allclose(base_metrics["obj_35_50_iou"], torch.tensor(expected_iou))
 
 
 def test_calculate_best_map_ious_and_thresholds_selects_maxima():

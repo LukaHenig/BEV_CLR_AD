@@ -12,7 +12,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import yaml
-from fire import Fire
 from shapely.errors import ShapelyDeprecationWarning
 from tabulate import tabulate
 from tensorboardX import SummaryWriter
@@ -28,7 +27,7 @@ from nets.segnet_simple_bev_with_map import SegnetWithMap
 from nets.segnet_simple_lift_fuse_ablation_new_decoders import (
     SegnetSimpleLiftFuse,
 )
-from nets.segnet_transformer_lift_fuse_new_decoders import (
+from nets.segnet_transformer_lift_fuse_lidar import (
     SegnetTransformerLiftFuse,
 )
 
@@ -57,8 +56,6 @@ XMIN, XMAX = -50, 50
 ZMIN, ZMAX = -50, 50
 YMIN, YMAX = -5, 5
 bounds = (XMIN, XMAX, YMIN, YMAX, ZMIN, ZMAX)
-
-Z, Y, X = 200, 8, 200
 
 val_day_len = 4449
 val_rain_len = 968
@@ -331,9 +328,10 @@ class SigmoidFocalLoss(torch.nn.Module):
         return f_loss
 
 
-def run_model(model, loss_fn, map_seg_loss_fn, d, device='cuda:0', sw=None, use_radar_encoder=None,
-              radar_encoder_type=None, train_task='both', use_shallow_metadata=True,
-              use_obj_layer_only_on_map=True, use_lidar=False):
+def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=None,
+              use_radar_encoder=None, radar_encoder_type=None, train_task='both',
+              use_shallow_metadata=True, use_obj_layer_only_on_map=True, use_lidar=False,
+              use_lidar_encoder=False, lidar_encoder_type=None):
     metrics = {}
     total_loss = torch.tensor(0.0, requires_grad=False).to(device)
 
@@ -409,15 +407,26 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device='cuda:0', sw=None, use_
     # combine ego car other cars and map
     ego_other_cars_on_map_g = ego_car_on_map_g * (1 - seg_bev_g) + other_cars_plane * seg_bev_g
 
-    rad_data = radar_data.to(device).permute(0, 2, 1)  # B, R, 19
+    rad_data = radar_data.to(device).permute(0, 2, 1)  # (B, R, 19)
+    rad_valid = (rad_data.abs().sum(dim=-1) > 0)
+    rad_keep = rad_valid.sum(dim=1).max().item()
+    rad_data = rad_data[:, :rad_keep, :]
+
     xyz_rad = rad_data[:, :, :3]
     meta_rad = rad_data[:, :, 3:]
     shallow_meta_rad = rad_data[:, :, 5:8]
+
     if use_lidar:
-        lid_data = lidar_data.to(device).permute(0, 2, 1)
+        lid_data = lidar_data.to(device).permute(0, 2, 1)  # (B, V_lid, 5)
+        lid_valid = (lid_data.abs().sum(dim=-1) > 0)
+        lid_keep = lid_valid.sum(dim=1).max().item()
+        lid_data = lid_data[:, :lid_keep, :]
+
         xyz_lid = lid_data[:, :, :3]
+        lid_intensity = lid_data[:, :, 3:4]
     else:
         xyz_lid = None
+        lid_intensity = None
 
     B, S, C, H, W = rgb_camXs.shape
 
@@ -468,13 +477,59 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device='cuda:0', sw=None, use_
     elif model.module.use_metaradar or use_shallow_metadata:
         assert False  # cannot use_metaradar without use_radar
 
+    # --- LiDAR -> Voxel / Occupancy vorbereiten + sanity checks ---
     lid_occ_mem0 = None
     if use_lidar and lid_xyz_cam0 is not None:
-        lid_occ_mem0 = vox_util.voxelize_xyz(lid_xyz_cam0, Z, Y, X, assert_cube=False)
+        if use_lidar_encoder and lidar_encoder_type == 'voxel_net':
+            # Grundvoraussetzungen: Intensitäten müssen zur XYZ-Form passen
+            assert lid_intensity is not None, "LiDAR intensity features required for voxel encoder"
+            assert lid_xyz_cam0.shape[:2] == lid_intensity.shape[:2], \
+                f"LiDAR xyz/feat mismatch: {lid_xyz_cam0.shape} vs {lid_intensity.shape}"
+    
+            # Voxelize für voxel_net: erwartet Tuple (features, coords, num_vox)
+            lid_vox_feats, lid_vox_coords, lid_num_vox = vox_util.voxelize_xyz_and_feats_voxelnet(
+                lid_xyz_cam0, lid_intensity, Z, Y, X,
+                assert_cube=False,
+                use_radar_occupancy_map=False,
+                clean_eps=0.0,
+                max_voxels=60000
+            )
+            lid_occ_mem0 = (lid_vox_feats, lid_vox_coords, lid_num_vox)
+    
+            # ---------- Sanity-Guards (wichtig!) ----------
+            # 1) Typ/Schnittstelle prüfen
+            assert isinstance(lid_occ_mem0, tuple) and len(lid_occ_mem0) == 3, \
+                f"LiDAR voxel_net expects (features, coords, num_vox); got: {type(lid_occ_mem0)}"
+    
+            lid_vox_feats, lid_vox_coords, lid_num_vox = lid_occ_mem0
+    
+            # 2) Batch-Dim sicherstellen (bei B=1 quetschen Collates gern die Dim weg)
+            if lid_vox_coords.dim() == 2:
+                lid_vox_coords = lid_vox_coords.unsqueeze(0)
+                lid_num_vox = lid_num_vox.unsqueeze(0)
+                lid_occ_mem0 = (lid_vox_feats, lid_vox_coords, lid_num_vox)
+    
+            # 3) Belegungs-Check – schnellster Indikator, ob der Pfad "lebt"
+            total_vox = int(lid_num_vox.sum().item())
+            print(f"[EVAL] LiDAR voxel_net -> occupied voxels (sum over batch): {total_vox}")
+            # hart: wenn 0, dann ist der Pfad praktisch tot (Bounds/Kalibrierung/Units prüfen)
+            assert total_vox > 0, "LiDAR produced zero occupied voxels"
+    
+        else:
+            # Occupancy-Pfad: dichte Belegung erwartet (B,1,Z,Y,X)
+            lid_occ_mem0 = vox_util.voxelize_xyz(lid_xyz_cam0, Z, Y, X, assert_cube=False)
+    
+            # ---------- Sanity-Guards für Occupancy ----------
+            if lid_occ_mem0 is not None:
+                assert lid_occ_mem0.ndim == 5 and lid_occ_mem0.shape[1] == 1, \
+                    f"LiDAR occupancy must be (B,1,Z,Y,X); got shape {tuple(lid_occ_mem0.shape)}"
+                print(f"[EVAL] LiDAR occupancy shape: {tuple(lid_occ_mem0.shape)}")
+    
 
     start_inference_t = time.time()  # optional: pure inference timing
     module = model.module if hasattr(model, "module") else model
     forward_params = inspect.signature(module.forward).parameters
+
     if "lidar_occ_mem0" in forward_params:
         seg_e = model(
             rgb_camXs=rgb_camXs,
@@ -484,6 +539,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, device='cuda:0', sw=None, use_
             rad_occ_mem0=in_occ_mem0,
             lidar_occ_mem0=lid_occ_mem0)
     else:
+        # Fallback ohne LiDAR-Arg (falls ein älterer Checkpoint/Modell)
         seg_e = model(
             rgb_camXs=rgb_camXs,
             pix_T_cams=pix_T_cams,
@@ -668,10 +724,11 @@ def main(
         final_dim=[448, 896],  # to match //8, //14, //16 and //32 in Vit
         ncams=6,
         nsweeps=5,
-        lidar_nsweeps=5,
+        lidar_nsweeps=1,
         # model
         encoder_type='dino_v2',
         radar_encoder_type='voxel_net',
+        lidar_encoder_type='voxel_net',
         use_rpn_radar=False,
         train_task='both',
         use_radar=False,
@@ -679,13 +736,16 @@ def main(
         use_radar_filters=False,
         use_metaradar=False,
         use_shallow_metadata=False,
-        use_lidar=False,
+        use_lidar=True,
+        use_lidar_encoder=True,
+        use_lidar_occupancy_map=False,
         use_pre_scaled_imgs=True,
         use_obj_layer_only_on_map=False,
         init_query_with_image_feats=False,
         do_rgbcompress=True,
         use_multi_scale_img_feats=False,
         num_layers=6,
+        grid_dim=(200, 8, 200),
         # cuda
         device_ids=[0],
         freeze_dino=True,
@@ -697,9 +757,20 @@ def main(
         do_drn_val_split=True,  # True
         learnable_fuse_query=True,
 ):
+    print("### FINAL EVAL KWARGS ###")
+    bound = inspect.signature(main).bind_partial(**locals())
+    # Vorsicht: locals() enthält mehr; zur Not einfach die wichtigsten Flags loggen:
+    for k in ["use_radar","use_radar_encoder","use_radar_filters","use_lidar","use_lidar_encoder",
+              "init_query_with_image_feats","use_multi_scale_img_feats",
+              "use_pre_scaled_imgs","grid_dim","nsweeps","lidar_nsweeps","train_task"]:
+        print(f"{k} =", locals().get(k))
+
+
     assert (model_type in ['transformer', 'simple_lift_fuse', 'SimpleBEV_map'])
     B = batch_size
     assert (B % len(device_ids) == 0)  # batch size must be divisible by number of gpus
+
+    Z, Y, X = grid_dim
 
     device = 'cuda:%d' % device_ids[0]
     print(device)
@@ -764,40 +835,32 @@ def main(
 
     # Transformer based lifting and fusion
     if model_type == 'transformer':
-        model = SegnetTransformerLiftFuse(Z_cam=200, Y_cam=8, X_cam=200, Z_rad=Z, Y_rad=Y, X_rad=X, vox_util=None,
-                                          use_radar=use_radar, use_metaradar=use_metaradar,
+        model = SegnetTransformerLiftFuse(Z_cam=Z, Y_cam=Y, X_cam=X, Z_rad=Z, Y_rad=Y, X_rad=X, vox_util=None,
+                                          use_radar=use_radar,
+                                          use_metaradar=use_metaradar,
                                           use_shallow_metadata=use_shallow_metadata,
                                           use_radar_encoder=use_radar_encoder,
-                                          do_rgbcompress=do_rgbcompress, encoder_type=encoder_type,
-                                          radar_encoder_type=radar_encoder_type, rand_flip=False, train_task=train_task,
+                                          do_rgbcompress=do_rgbcompress,
+                                          encoder_type=encoder_type,
+                                          radar_encoder_type=radar_encoder_type,
+                                          rand_flip=False,
+                                          train_task=train_task,
                                           init_query_with_image_feats=init_query_with_image_feats,
-                                          use_obj_layer_only_on_map=use_obj_layer_only_on_map, do_feat_enc_dec=True,
-                                          use_multi_scale_img_feats=use_multi_scale_img_feats, num_layers=num_layers,
+                                          use_obj_layer_only_on_map=use_obj_layer_only_on_map,
+                                          do_feat_enc_dec=do_feat_enc_dec,
+                                          use_multi_scale_img_feats=use_multi_scale_img_feats,
+                                          num_layers=num_layers,
+                                          latent_dim=128,
                                           combine_feat_init_w_learned_q=combine_feat_init_w_learned_q,
-                                          use_rpn_radar=use_rpn_radar, use_radar_occupancy_map=use_radar_occupancy_map,
-                                          freeze_dino=freeze_dino, learnable_fuse_query=learnable_fuse_query,
-                                          use_lidar=use_lidar)
+                                          use_rpn_radar=use_rpn_radar,
+                                          use_radar_occupancy_map=use_radar_occupancy_map,
+                                          freeze_dino=freeze_dino,
+                                          learnable_fuse_query=learnable_fuse_query,
+                                          use_lidar=use_lidar,
+                                          use_lidar_encoder=use_lidar_encoder,
+                                          lidar_encoder_type=lidar_encoder_type,
+                                          use_lidar_occupancy_map=use_lidar_occupancy_map)
 
-    elif model_type == 'simple_lift_fuse':
-        # our net with replaced lifting and fusion from SimpleBEV
-        model = SegnetSimpleLiftFuse(Z_cam=200, Y_cam=8, X_cam=200, Z_rad=Z, Y_rad=Y, X_rad=X, vox_util=None,
-                                     use_radar=use_radar, use_metaradar=use_metaradar,
-                                     use_shallow_metadata=use_shallow_metadata, use_radar_encoder=use_radar_encoder,
-                                     do_rgbcompress=do_rgbcompress, encoder_type=encoder_type,
-                                     radar_encoder_type=radar_encoder_type, rand_flip=False, train_task=train_task,
-                                     use_obj_layer_only_on_map=use_obj_layer_only_on_map,
-                                     do_feat_enc_dec=do_feat_enc_dec,
-                                     use_multi_scale_img_feats=use_multi_scale_img_feats, num_layers=num_layers,
-                                     latent_dim=128, use_rpn_radar=use_rpn_radar,
-                                     use_radar_occupancy_map=use_radar_occupancy_map,
-                                     use_lidar=use_lidar,
-                                     freeze_dino=freeze_dino)
-
-    else:  # model_type == 'SimpleBEV_map'
-        model = SegnetWithMap(Z, Y, X, vox_util=vox_util, use_radar=use_radar,
-                              use_metaradar=use_metaradar, use_shallow_metadata=use_shallow_metadata,
-                              do_rgbcompress=do_rgbcompress, encoder_type=encoder_type, rand_flip=False,
-                              train_task=train_task, freeze_dino=freeze_dino)
 
     model = model.to(device)
     model = torch.nn.DataParallel(model, device_ids=device_ids)
@@ -894,11 +957,24 @@ def main(
         read_time = time.time() - read_start_time
 
         with torch.no_grad():
-            total_loss, metrics, inference_t = run_model(model, seg_loss_fn, map_seg_loss_fn, sample, device, sw_ev,
-                                                         use_radar_encoder, radar_encoder_type, train_task,
-                                                        use_shallow_metadata=use_shallow_metadata,
-                                                         use_obj_layer_only_on_map=use_obj_layer_only_on_map,
-                                                         use_lidar=use_lidar)
+            total_loss, metrics, inference_t = run_model(
+                model,
+                seg_loss_fn,
+                map_seg_loss_fn,
+                sample,
+                Z,
+                Y,
+                X,
+                device,
+                sw_ev,
+                use_radar_encoder,
+                radar_encoder_type,
+                train_task,
+                use_shallow_metadata=use_shallow_metadata,
+                use_obj_layer_only_on_map=use_obj_layer_only_on_map,
+                use_lidar=use_lidar,
+                use_lidar_encoder=use_lidar_encoder,
+                lidar_encoder_type=lidar_encoder_type)
             inference_time += inference_t
 
         # range based iou clac

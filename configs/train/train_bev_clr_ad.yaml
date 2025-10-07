@@ -43,7 +43,7 @@ rand_crop_and_resize: false      # If true, use random resize + crop in the data
 ncams: 6                         # Number of cameras per sample (nuScenes uses 6).
 nsweeps: 5                       # Number of RADAR sweeps to aggregate per sample (passed to the loader).
 lidar_nsweeps: 1                 # Number of LiDAR sweeps to aggregate per sample (used when use_lidar=true).
-grid_dim: [400, 16, 400]          # Voxel grid (Z, Y, X). Y is vertical bins; BEV plane is Z (forward) × X (right).
+grid_dim: [200, 8, 200]          # Voxel grid (Z, Y, X). Y is vertical bins; BEV plane is Z (forward) × X (right).
 
 # ======================
 # Core task selection

@@ -1151,11 +1151,18 @@ class SegnetTransformerLiftFuse(nn.Module):
                 lid_bev_ = self.lidar_occ_compressor(occ)  # (B, latent_dim, Z, X)
         
         if self.use_radar:
-            rad_bev_ = self.rad_ch_proj(rad_bev_)      # -> [B, latent_dim, Z, X]
+            # Nur projizieren, falls die Kanalzahl NICHT schon latent_dim ist
+            if rad_bev_.shape[1] != self.latent_dim:
+                rad_bev_ = self.rad_ch_proj(rad_bev_)  # erwartet 64*(Z//2) Kanäle → proj. auf latent_dim
+            else:
+                # Debug: bestätigt, dass der Encoder bereits latent_dim liefert (z.B. 128)
+                if self.is_master:
+                    print(f"[EVAL] radar encoder output already latent_dim={self.latent_dim}, skip rad_ch_proj")
 
         if self.use_lidar:
             if self.use_lidar_encoder:
-                lid_bev_ = self.lid_ch_proj(lid_bev_)  # -> [B, latent_dim, Z, X]
+                if lid_bev_.shape[1] != self.latent_dim:
+                    lid_bev_ = self.lid_ch_proj(lid_bev_)
             else:
                 # lid_bev_ already comes from lidar_occ_compressor with latent_dim channels
                 pass

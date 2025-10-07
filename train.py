@@ -1012,7 +1012,7 @@ def main(
         rand_crop_and_resize=True,
         ncams=6,
         nsweeps=5,
-        lidar_nsweeps=5,
+        lidar_nsweeps=1,
         # model
         encoder_type='dino_v2',
         radar_encoder_type='voxel_net',

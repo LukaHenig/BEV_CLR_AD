@@ -10,7 +10,7 @@ log_freq: 100                    # Logging cadence (steps) for evaluation metric
 shuffle: false                   # Keep deterministic ordering for evaluation.
 dset: 'trainval'                 # Evaluate on the trainval split to mirror training data coverage.
 batch_size: 1                    # Evaluation uses batch size 1 (DataParallel still splits across device_ids).
-nworkers: 16                     # DataLoader workers; align with training unless resources require fewer.
+nworkers: 4                      # DataLoader workers; align with training unless resources require fewer.
 do_drn_val_split: true           # Also report metrics per day/rain/night subsets.
 
 # ======================
@@ -33,12 +33,14 @@ final_dim: [448, 896]            # (H, W) image size after processing; matches t
 ncams: 6                         # Number of cameras per sample (nuScenes uses 6).
 nsweeps: 5                       # Number of RADAR sweeps aggregated per sample.
 lidar_nsweeps: 1                 # Number of LiDAR sweeps aggregated per sample (matches training pipeline).
+grid_dim: [200, 8, 200]          # Voxel grid (Z, Y, X). Y is vertical bins; BEV plane is Z (forward) × X (right).
 
 # ======================
 # Model parameters
 # ======================
 encoder_type: 'dino_v2'          # Image backbone: 'dino_v2' (ViT-B/14 adapter).
 radar_encoder_type: 'voxel_net'  # RADAR BEV encoder: currently 'voxel_net' (sparse voxel feature net).
+lidar_encoder_type: 'voxel_net'  # LiDAR BEV encoder: currently 'voxel_net' (sparse voxel feature net).
 use_rpn_radar: false             # Keep RPN disabled as in training.
 train_task: 'both'               # Shared decoder for objects and semantic map tasks.
 use_radar: true                  # Enable RADAR branch during inference.

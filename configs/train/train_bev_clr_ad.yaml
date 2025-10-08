@@ -11,7 +11,7 @@ log_freq: 100                    # How often to log scalars/images to TensorBoar
 shuffle: true                    # Shuffle training samples each epoch (affects dataloader).
 dset: 'trainval'                 # Dataset split to load in nuscenes_data.compile_data (e.g., 'train', 'trainval', 'mini').
 save_freq: 1000                  # Save a checkpoint every N steps.
-batch_size: 4                    # Per-step mini-batch size (must be divisible by len(device_ids) if using DataParallel).
+batch_size: 1                    # Per-step mini-batch size (must be divisible by len(device_ids) if using DataParallel).
 grad_acc: 5                      # Gradient accumulation steps. Effective batch size = batch_size * grad_acc.
 lr: 0.0003                       # Peak LR for OneCycleLR (if use_scheduler=true); base LR for constant schedule otherwise.
 use_scheduler: true              # Use OneCycleLR schedule (warms up then anneals).
@@ -69,7 +69,7 @@ num_layers: 6                    # Number of transformer encoder & fuser blocks 
 radar_encoder_type: 'voxel_net'  # RADAR BEV encoder: currently 'voxel_net' (sparse voxel feature net).
 use_rpn_radar: false             # If true, enables a small RPN head in VoxelNet (often didn’t help in your experiments).
 use_radar: true                  # Enable RADAR branch at all.
-use_radar_filters: true          # Apply classic radar filtering in the loader (e.g., remove outliers/ghosts).
+use_radar_filters: false          # Apply classic radar filtering in the loader (e.g., remove outliers/ghosts).
 use_radar_encoder: true          # If true, expect (features, coords, num_voxels) tuple and run VoxelNet; else occupancy.
 use_radar_occupancy_map: false   # If true (and encoder supports), feed a 1-ch occupancy to the encoder instead of meta.
 use_metaradar: false             # Enable 16-ch handcrafted meta features per radar point (when not using VoxelNet tuple).
@@ -86,7 +86,7 @@ use_lidar_occupancy_map: false   # If true (and encoder supports), provide a 1-c
 # ======================
 # Misc / model plumbing
 # ======================
-device_ids: [0,1,2,3,4,5,6,7]                  # GPU ids used by torch.nn.DataParallel. batch_size must be divisible by len(device_ids).
+device_ids: [0]                  # GPU ids used by torch.nn.DataParallel. batch_size must be divisible by len(device_ids).
 freeze_dino: true                # Freeze DINO-V2 backbone (saves memory & stabilizes; unfreeze to fine-tune at a cost).
 do_feat_enc_dec: true            # Apply BEV feature encoder–decoder refinement (ResNet18-like with skips) after fusion.
 combine_feat_init_w_learned_q: true

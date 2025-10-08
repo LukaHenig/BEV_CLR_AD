@@ -641,7 +641,30 @@ class Encoder_res50(nn.Module):
         feat_dict["output"] = x
 
         return feat_dict  # x
+    
+class AdaptiveProj(nn.Module):
+    """
+    1x1 projection that lazily builds itself on first forward() to match x.shape[1].
+    If x already has latent_dim channels, this becomes Identity() with no params.
+    """
+    def __init__(self, latent_dim: int):
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.impl = nn.Identity()            # registered from the start
 
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # lazily replace the Identity with a real conv, ON THE INPUT'S DEVICE
+        if isinstance(self.impl, nn.Identity):
+            in_ch = x.shape[1]
+            if in_ch != self.latent_dim:
+                seq = nn.Sequential(
+                    nn.Conv2d(in_ch, self.latent_dim, kernel_size=1, bias=False),
+                    nn.InstanceNorm2d(self.latent_dim),
+                    nn.GELU(),
+                ).to(x.device)              # <<< important
+                self.impl = seq             # stays registered as a submodule
+        return self.impl(x)
+   
 
 class SegnetTransformerLiftFuse(nn.Module):
     def __init__(self, Z_cam: int, Y_cam: int, X_cam: int, Z_rad: int, Y_rad: int, X_rad: int,
@@ -689,8 +712,6 @@ class SegnetTransformerLiftFuse(nn.Module):
         self.do_rgbcompress = do_rgbcompress
         self.rand_flip = rand_flip
         self.latent_dim = latent_dim
-        self.rad_ch_proj = nn.Identity()
-        self.lid_ch_proj = nn.Identity()
         self.encoder_type = encoder_type
         self.radar_encoder_type = radar_encoder_type
         self.train_task = train_task
@@ -714,6 +735,10 @@ class SegnetTransformerLiftFuse(nn.Module):
         self.freeze_dino = freeze_dino
         self.learnable_fuse_query = learnable_fuse_query
         self.is_master = is_master
+        # --- Channel adapters (1x1 conv tails) ---
+        # Auto-adaptive: creates 1x1 only if needed, otherwise Identity (no params)
+        self.rad_ch_proj = AdaptiveProj(latent_dim) if self.use_radar else nn.Identity()
+        self.lid_ch_proj = AdaptiveProj(latent_dim) if self.use_lidar else nn.Identity()
 
         if self.is_master:
             print("latent_dim: ", latent_dim)
@@ -808,27 +833,6 @@ class SegnetTransformerLiftFuse(nn.Module):
             if self.is_master and not self.use_radar:
                 print("#############    CAM ONLY    ##############")
 
-        # --- NEW: channel adapters (1x1 conv tails) ---
-
-        self.rad_ch_proj = nn.Identity()
-        self.lid_ch_proj = nn.Identity()
-
-        if self.use_radar:
-            in_ch = 64 * (self.Z_rad // 2)  # 6400 or 12800
-            # if you ever set use_col=True, set rad_ch_proj = Identity instead
-            self.rad_ch_proj = nn.Sequential(
-                nn.Conv2d(in_ch, self.latent_dim, kernel_size=1, bias=False),
-                nn.InstanceNorm2d(self.latent_dim),
-                nn.GELU(),
-            )
-
-        if self.use_lidar and self.use_lidar_encoder:
-            in_ch = 64 * (self.Z_cam // 2)
-            self.lid_ch_proj = nn.Sequential(
-                nn.Conv2d(in_ch, self.latent_dim, kernel_size=1, bias=False),
-                nn.InstanceNorm2d(self.latent_dim),
-                nn.GELU(),
-            )
 
         if self.use_radar and self.use_lidar:
             # cross-attention module to fuse radar and LiDAR before camera fusion
@@ -1151,21 +1155,11 @@ class SegnetTransformerLiftFuse(nn.Module):
                 lid_bev_ = self.lidar_occ_compressor(occ)  # (B, latent_dim, Z, X)
         
         if self.use_radar:
-            # Nur projizieren, falls die Kanalzahl NICHT schon latent_dim ist
-            if rad_bev_.shape[1] != self.latent_dim:
-                rad_bev_ = self.rad_ch_proj(rad_bev_)  # erwartet 64*(Z//2) Kanäle → proj. auf latent_dim
-            else:
-                # Debug: bestätigt, dass der Encoder bereits latent_dim liefert (z.B. 128)
-                if self.is_master:
-                    print(f"[EVAL] radar encoder output already latent_dim={self.latent_dim}, skip rad_ch_proj")
-
+            rad_bev_ = self.rad_ch_proj(rad_bev_)
         if self.use_lidar:
             if self.use_lidar_encoder:
-                if lid_bev_.shape[1] != self.latent_dim:
-                    lid_bev_ = self.lid_ch_proj(lid_bev_)
-            else:
-                # lid_bev_ already comes from lidar_occ_compressor with latent_dim channels
-                pass
+                lid_bev_ = self.lid_ch_proj(lid_bev_)
+            # else: lidar_occ_compressor already emits latent_dim → AdaptiveProj would be Identity anyway
 
         # After computing rad_bev_ / lid_bev_
         B = rad_bev_.shape[0] if isinstance(rad_bev_, torch.Tensor) else B

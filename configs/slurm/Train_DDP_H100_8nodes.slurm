@@ -10,7 +10,11 @@
 #SBATCH --error=logs/%x_%j.err
 # SBATCH --account=YOUR_ACCOUNT     # (optional) uncomment & set if your cluster requires it
 
+
+###########################################################################################################
 ## If your already on the GPU just run the sript directly (./configs/slurm/Train_DDP_H100_8nodes.slurm)
+## important configs ( batch size = 4, nworkers = 4 , device_ids = [0,1,2,3,4,5,6,7] )
+##########################################################################################################
 
 # --- env / modules ---
 module purge

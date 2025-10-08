@@ -638,8 +638,28 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
     elif model.module.use_metaradar or use_shallow_metadata:
         assert False  # cannot use_metaradar without use_radar
 
+    # --- LiDAR (VoxelNet path, mirrors train.py) ---
+    lid_occ_mem0 = None
     if use_lidar and lid_xyz_cam0 is not None:
-        lid_occ_mem0 = vox_util.voxelize_xyz(lid_xyz_cam0, Z, Y, X, assert_cube=False)
+        if use_lidar_encoder and lidar_encoder_type == 'voxel_net':
+            # We already built lid_intensity above as lid_data[:, :, 3:4]
+            assert lid_xyz_cam0.shape[0] == lid_intensity.shape[0] and \
+                   lid_xyz_cam0.shape[1] == lid_intensity.shape[1], \
+                   f"LIDAR xyz/feat mismatch: {lid_xyz_cam0.shape} vs {lid_intensity.shape}"
+
+            lid_vox_feats, lid_vox_coords, lid_num_vox = vox_util.voxelize_xyz_and_feats_voxelnet(
+                lid_xyz_cam0, lid_intensity, Z, Y, X,
+                assert_cube=False,
+                use_radar_occupancy_map=False,
+                clean_eps=0.0,
+                max_voxels=60000  # e.g., 60k for LiDAR
+            )
+
+            # The model expects a (features, coords, num_vox) tuple
+            lid_occ_mem0 = (lid_vox_feats, lid_vox_coords, lid_num_vox)
+        else:
+            # Lightweight fallback: plain occupancy (not used in Option A, but keep for completeness)
+            lid_occ_mem0 = vox_util.voxelize_xyz(lid_xyz_cam0, Z, Y, X, assert_cube=False)
 
     module = model.module if hasattr(model, "module") else model
     forward_params = inspect.signature(module.forward).parameters
@@ -1266,7 +1286,12 @@ def main(
 
         optimizer.param_groups[0]['capturable'] = True
 
-    model = DDP(model, device_ids=[local_rank])
+    model = DDP(
+        model,
+        device_ids=[local_rank],
+        find_unused_parameters=True,          
+        gradient_as_bucket_view=True          
+    )
 
     # for obj. segmentation head
     seg_loss_fn = SimpleLoss(2.13).to(device)  # value from lift-splat

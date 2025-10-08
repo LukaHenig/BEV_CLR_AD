@@ -1,22 +1,45 @@
 #!/bin/bash
-#SBATCH --partition=gpu8            # oder passender GPU-Partitionname
-#SBATCH --gres=gpu:h100:8
-#SBATCH --time=1:00:00
-#SBATCH --time=48:00:00
+#SBATCH --job-name=bevclr_ddp
+#SBATCH --partition=gpu8             
 #SBATCH --nodes=1
-#SBATCH --ntasks=96                   # 1 Task pro GPU
-#SBATCH --mem=1400G
-#SBATCH --output=logs_train/DDP_H100/%x_%j.out
-#SBATCH --job-name=bevcar_train
+#SBATCH --gres=gpu:h100:8
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=96          # CPU threads total on the node; adjust to your node
+#SBATCH --time=2:00:00              # TODO: adjust
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
+# SBATCH --account=YOUR_ACCOUNT     # (optional) uncomment & set if your cluster requires it
 
-# Lade Module oder aktiviere Umgebung
-#source ~/.bashrc
-#conda activate bev_clr_ad
+## If your already on the GPU just run the sript directly (./configs/slurm/Train_DDP_H100_8nodes.slurm)
 
-# Training starten
-export OMP_NUM_THREADS=16
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
-export WANDB__SERVICE_WAIT=300
+# --- env / modules ---
+module purge
+module load devel/cuda/12.4
 
-torchrun --nproc_per_node=8 --nnodes=1 --master_port=12345 \
-  train_DDP.py --config='configs/train/train_bev_clr_ad.yaml'
+# Conda (adapt if your site uses a different init script)
+source ~/.bashrc
+conda activate bev_clr_ad
+
+# --- quiet runtime env ---
+export OMP_NUM_THREADS=4
+export PYTHONUNBUFFERED=1
+
+# Silence chatty libs:
+export PYTHONWARNINGS="ignore"       # hide UserWarnings (e.g., sklearn/numpy)
+export NCCL_DEBUG=ERROR              # hide NCCL INFO/WARN
+export TQDM_DISABLE=1                # hide tqdm progress bars (if used)
+export WANDB_SILENT=false             # minimize W&B chatter
+export WANDB_CONSOLE=auto            # (off) for no console hijack
+
+
+# --- paths ---
+PROJECT_DIR="/home/es/es_es/es_luheit04/forschungsprojekt/BEV_CLR_AD"
+CONFIG_PATH="configs/train/train_bev_clr_ad.yaml"
+
+mkdir -p "$PROJECT_DIR/logs_train/DDP_H100"
+cd "$PROJECT_DIR"
+
+# --- launch ---
+# Single-node, 8 GPUs, torchrun standalone rendezvous
+torchrun --nproc_per_node=${SLURM_GPUS_ON_NODE:-8} --standalone \
+  train_DDP.py --config="$CONFIG_PATH"

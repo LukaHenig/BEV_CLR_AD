@@ -920,7 +920,7 @@ def main(
         lr=3e-4,
         use_scheduler=True,
         weight_decay=1e-7,
-        nworkers=12,
+        nworkers=4,
         # data/log/save/load directories
         data_dir='../nuscenes/',
         custom_dataroot='../../../nuscenes/scaled_images',
@@ -1013,21 +1013,21 @@ def main(
     torch.cuda.empty_cache()
     device = torch.device(f"cuda:{local_rank}")
 
-    dist.barrier()
+    #dist.barrier()
     # debug only
     if torch.cuda.is_available():
         if is_master:
             print("CUDA is available")
             print("Devices available: %d " % torch.cuda.device_count())
             print("############### GPU CACHE EMPTIED ###############")
-        dist.barrier()
+        #dist.barrier()
         if is_master:  # split only for sequential printing
             print(f"\nMASTER process: rank {rank}, local_rank {local_rank}", flush=True)
         else:
             print(f"\nWORKER process: rank {rank}, local_rank {local_rank}", flush=True)
     else:
         print("CUDA is --- NOT --- available")
-    dist.barrier()
+    #dist.barrier()
 
     # autogen a name
     model_name = "%d" % B
@@ -1050,7 +1050,7 @@ def main(
     # set up ckpt and logging
     ckpt_dir = os.path.join(ckpt_dir, model_name)
 
-    dist.barrier()
+    #dist.barrier()
     if rank == 0:
         try:
             writer_t = SummaryWriter(os.path.join(log_dir, model_name, 't'), max_queue=10, flush_secs=60)
@@ -1059,7 +1059,7 @@ def main(
     else:
         writer_t = None
 
-    dist.barrier()
+    #dist.barrier()
 
     if is_master:
         print('model_name', model_name)
@@ -1126,8 +1126,9 @@ def main(
         "combine_feat_init_w_learned_q": combine_feat_init_w_learned_q,
     }
 
-    wandb.init(project=model_name, config=wandb_config, group=group, notes=notes, name=name)
-    dist.barrier()
+    if is_master:
+        wandb.init(project=model_name, config=wandb_config, group=group, notes=notes, name=name)
+    # no barrier here
 
     if rand_crop_and_resize:
         resize_lim = [0.8, 1.2]
@@ -1265,7 +1266,7 @@ def main(
 
         optimizer.param_groups[0]['capturable'] = True
 
-    model = DDP(model, device_ids=[local_rank], static_graph=True)
+    model = DDP(model, device_ids=[local_rank])
 
     # for obj. segmentation head
     seg_loss_fn = SimpleLoss(2.13).to(device)  # value from lift-splat
@@ -1363,12 +1364,12 @@ def main(
                                   commit=False, train_task=train_task)
 
         # save model checkpoint
-        if np.mod(global_step, save_freq) == 0 and rank == 0:
-            saverloader.save(ckpt_dir, optimizer, model.module, global_step, scheduler=scheduler,
+        if np.mod(global_step, save_freq) == 0:
+            if rank == 0:
+                saverloader.save(ckpt_dir, optimizer, model.module, global_step, scheduler=scheduler,
                              keep_latest=keep_latest)
-
-        # wait until model is saved
-        dist.barrier()
+            # wait until model is saved
+            dist.barrier()
 
         model.train()
 

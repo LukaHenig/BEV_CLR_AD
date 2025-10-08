@@ -11,7 +11,7 @@ log_freq: 100                    # How often to log scalars/images to TensorBoar
 shuffle: true                    # Shuffle training samples each epoch (affects dataloader).
 dset: 'trainval'                 # Dataset split to load in nuscenes_data.compile_data (e.g., 'train', 'trainval', 'mini').
 save_freq: 1000                  # Save a checkpoint every N steps.
-batch_size: 8                    # Per-step mini-batch size (must be divisible by len(device_ids) if using DataParallel).
+batch_size: 4                    # Per-step mini-batch size (must be divisible by len(device_ids) if using DataParallel).
 grad_acc: 5                      # Gradient accumulation steps. Effective batch size = batch_size * grad_acc.
 lr: 0.0003                       # Peak LR for OneCycleLR (if use_scheduler=true); base LR for constant schedule otherwise.
 use_scheduler: true              # Use OneCycleLR schedule (warms up then anneals).

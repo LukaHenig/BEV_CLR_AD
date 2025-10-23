@@ -481,42 +481,49 @@ def get_rgba_map_from_mask2(map_masks, threshold=0.8, a=0.4):
     return torch.Tensor(bev_map)
 
 
-def get_rgba_map_from_mask2_on_batch(map_masks: torch.Tensor, threshold: float = 0.8, a: float = 0.4) -> torch.Tensor:
+def get_rgba_map_from_mask2_on_batch(map_masks: torch.Tensor, threshold: float = 0.8,
+                                     a: float = 0.4) -> torch.Tensor:
+    """Create an RGB rendering for a batch of BEV map logits.
+
+    Args:
+        map_masks: Tensor of shape ``(B, C, H, W)`` containing per-class probabilities.
+        threshold: Probability threshold that determines whether a pixel is rendered.
+        a: Alpha value used when blending overlapping layers.
+
+    Returns:
+        torch.Tensor: A tensor of shape ``(B, 3, H, W)`` with values in ``[0, 1]`` on the same
+            device as ``map_masks``.
     """
-    class 0:    'drivable_area' --- color in rbg: (1.00, 0.50, 0.31)\n
-    class 1:    'carpark_area'  --- color '#FFD700' in rbg: (255./255., 215./255., 0./255)\n
-    class 2:    'ped_crossing'  --- color '#069AF3' in rbg: (6./255., 154/255., 243/255.) \n
-    class 3:    'walkway'       --- color '#FF00FF' in rbg: (255./255., 0./255., 255./255.) \n
-    class 4:    'stop_line'     --- color '#FF0000' in rbg: (255./255., 0./255., 0./255.) \n
-    class 5:    'road_divider'  --- color in rbg: (0.0, 0.0, 1.0)\n
-    class 6:    'lane_divider'  --- color in rbg: (159./255., 0.0, 1.0)\n
 
-    threshold: defines at which probability the pixel belongs to a certain class
-    a: sets the opacity of the mask layers; if alpha=1.0 no overlapping visible; default: alpha=0.4
-    """
-    B, classes, length_z, length_x = map_masks.shape  # (B,7,200,200)
-    # (7, 200, 200)
-    bev_map = np.ones((B, 3, length_z, length_x))
-    rgba_image = np.ones((4, length_z, length_x), dtype=np.float32)
+    if map_masks.ndim != 4:
+        raise ValueError(f"Expected map_masks to be 4D (B, C, H, W) but got {map_masks.shape}")
 
-    for b in range(B):
-        for layer, (mask, color) in enumerate(zip(map_masks[b], masks_colors)):
-            alpha = a * (mask > threshold).astype(np.float32)
-            # Assign RGB values based on the color
-            rgb = np.full((3, length_z, length_x), color[..., np.newaxis, np.newaxis])
+    # Work on detached data – this is a pure visualisation routine.
+    map_masks = map_masks.detach()
+    device = map_masks.device
+    dtype = map_masks.dtype
 
-            # Combine the RGB and alpha channels
-            rgba = np.concatenate([rgb, np.expand_dims(alpha, axis=0)], axis=0)
+    B, C, H, W = map_masks.shape
 
-            # Update the RGBA image with the values of the current mask
-            rgba_image = rgba_image * (1 - alpha) + rgba * alpha
+    # Convert colours to tensors on the correct device.
+    colors = torch.as_tensor(masks_colors, dtype=dtype, device=device)  # (C, 3)
 
-        bev_map[b] = rgba_image[:3]
+    # Compute alpha masks after thresholding.
+    alpha = (map_masks > threshold).to(dtype) * a  # (B, C, H, W)
 
-    # clip values
-    if bev_map.max() > 1.0:
-        bev_map = np.clip(bev_map, 0.0, 1.0)
-    return torch.Tensor(bev_map)
+    # Initialise RGBA canvas with ones to match historical behaviour.
+    rgba = torch.ones((B, 4, H, W), dtype=dtype, device=device)
+
+    for layer in range(C):
+        layer_alpha = alpha[:, layer:layer + 1]  # (B, 1, H, W)
+        if torch.any(layer_alpha > 0):
+            layer_color = colors[layer].view(1, 3, 1, 1)
+            rgba_rgb = layer_color * layer_alpha
+            rgba[:, :3] = rgba[:, :3] * (1 - layer_alpha) + rgba_rgb
+            rgba[:, 3:] = rgba[:, 3:] * (1 - layer_alpha) + layer_alpha
+
+    bev_map = rgba[:, :3]
+    return bev_map.clamp_(0.0, 1.0)
 
 
 class NuscData(torch.utils.data.Dataset):

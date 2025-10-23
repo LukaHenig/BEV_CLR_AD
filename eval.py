@@ -576,9 +576,12 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
             bev_map_only_mask_g = bev_map_mask_g
 
         map_seg_threshold = 0.4
+        bev_map_probs = torch.sigmoid(bev_map_mask_e).detach()
         bev_map_e = nuscenes_data.get_rgba_map_from_mask2_on_batch(
-            torch.sigmoid(bev_map_mask_e).detach().cpu().numpy(),
-            threshold=map_seg_threshold, a=0.4).to(device)
+            bev_map_probs,
+            threshold=map_seg_threshold,
+            a=0.4,
+        )
 
         # combine ego car and bev_map_e
         ego_car_on_map_e = bev_map_e * (1 - egocar_bev) + ego_plane * egocar_bev  # check dims

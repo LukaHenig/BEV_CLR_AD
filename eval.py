@@ -526,12 +526,13 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
                 print(f"[EVAL] LiDAR occupancy shape: {tuple(lid_occ_mem0.shape)}")
     
 
-    start_inference_t = time.time()  # optional: pure inference timing
+    start_inference_t = time.time()
     module = model.module if hasattr(model, "module") else model
     forward_params = inspect.signature(module.forward).parameters
-
+    
+    # 1) Forward wie im Training aufrufen
     if "lidar_occ_mem0" in forward_params:
-        seg_e = model(
+        out = model(
             rgb_camXs=rgb_camXs,
             pix_T_cams=pix_T_cams,
             cam0_T_camXs=cam0_T_camXs,
@@ -539,14 +540,25 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
             rad_occ_mem0=in_occ_mem0,
             lidar_occ_mem0=lid_occ_mem0)
     else:
-        # Fallback ohne LiDAR-Arg (falls ein älterer Checkpoint/Modell)
-        seg_e = model(
+        out = model(
             rgb_camXs=rgb_camXs,
             pix_T_cams=pix_T_cams,
             cam0_T_camXs=cam0_T_camXs,
             vox_util=vox_util,
             rad_occ_mem0=in_occ_mem0)
-    inference_t = time.time() - start_inference_t  # optional: pure inference timing
+    
+    # 2) Tuple-Return sicher entpacken (kompatibel zu alten/simplen Returns)
+    if isinstance(out, tuple) and len(out) == 2 and isinstance(out[1], dict):
+        seg_e, factors = out
+    else:
+        seg_e, factors = out, {}
+    
+    # 3) Sichere Default-Faktoren auf dem richtigen Device
+    one = seg_e.new_tensor(1.0)
+    ce_factor = factors.get("ce_factor", one)
+    fc_map_factor = factors.get("fc_map_factor", one)
+    
+    inference_t = time.time() - start_inference_t
     # print("Inference time: ", inference_t)  # optional: pure inference timing
 
     # get bev map from masks

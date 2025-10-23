@@ -1392,11 +1392,17 @@ class SegnetTransformerLiftFuse(nn.Module):
             seg_e = bev_map_seg_e
 
         if self.train_task == "both":
-            out_dict_shared = self.shared_decoder(feat_bev, (
-                self.bev_flip1_index, self.bev_flip2_index) if self.rand_flip else None)
-            # map estimation data
+            out_dict_shared = self.shared_decoder(
+                feat_bev,
+                (self.bev_flip1_index, self.bev_flip2_index) if self.rand_flip else None
+            )
             bev_map_seg_e = out_dict_shared['bev_map_segmentation']
             obj_seg_e = out_dict_shared['obj_segmentation']
             seg_e = torch.cat([bev_map_seg_e, obj_seg_e], dim=1)  # [b, 8, 200, 200]
-
-        return seg_e
+        
+        # --- compute loss-scale factors as local tensors (do NOT store on self)
+        ce_factor = torch.exp(-self.ce_weight) if hasattr(self, "ce_weight") else None
+        fc_map_factor = torch.exp(-self.fc_map_weight) if hasattr(self, "fc_map_weight") else None
+        
+        # return the usual output PLUS a dict of factors
+        return seg_e, {"ce_factor": ce_factor, "fc_map_factor": fc_map_factor}

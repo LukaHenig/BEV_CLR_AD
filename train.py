@@ -631,7 +631,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
     module = model.module if hasattr(model, "module") else model
     forward_params = inspect.signature(module.forward).parameters
     if "lidar_occ_mem0" in forward_params:
-        seg_e = model(
+        out = model(
             rgb_camXs=rgb_camXs,
             pix_T_cams=pix_T_cams,
             cam0_T_camXs=cam0_T_camXs,
@@ -639,12 +639,22 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
             rad_occ_mem0=in_occ_mem0,
             lidar_occ_mem0=lid_occ_mem0)
     else:
-        seg_e = model(
+        out = model(
             rgb_camXs=rgb_camXs,
             pix_T_cams=pix_T_cams,
             cam0_T_camXs=cam0_T_camXs,
             vox_util=vox_util,
             rad_occ_mem0=in_occ_mem0)
+        
+    if isinstance(out, tuple) and len(out) == 2 and isinstance(out[1], dict):
+        seg_e, factors = out
+    else:
+        seg_e, factors = out, {}
+    
+    # --- safe defaults on the correct device/dtype ---
+    one = seg_e.new_tensor(1.0)
+    ce_factor = factors.get("ce_factor", one)
+    fc_map_factor = factors.get("fc_map_factor", one)
 
     # get bev map from masks
     if train_task == 'both' or train_task == 'map':
@@ -679,8 +689,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
         # loss calculation
         map_seg_fc_loss = map_seg_loss_fn(bev_map_mask_e, bev_map_only_mask_g)
         #   map
-        fc_map_factor = 1 / torch.exp(model.module.fc_map_weight)
-        map_seg_fc_loss = 20.0 * map_seg_fc_loss * fc_map_factor  # 20.0
+        map_seg_fc_loss = 20.0 * map_seg_fc_loss * fc_map_factor
         # add to total loss
         total_loss += map_seg_fc_loss
 
@@ -776,8 +785,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
         # clc loss
         ce_loss = loss_fn(obj_seg_bev_e, seg_bev_g, valid_bev_g)
         # obj
-        ce_factor = 1 / torch.exp(model.module.ce_weight)
-        ce_loss = 10.0 * ce_loss * ce_factor  # 10.0
+        ce_loss = 10.0 * ce_loss * ce_factor
         total_loss += ce_loss
 
         # object IoUs

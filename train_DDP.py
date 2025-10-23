@@ -661,23 +661,38 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
             # Lightweight fallback: plain occupancy (not used in Option A, but keep for completeness)
             lid_occ_mem0 = vox_util.voxelize_xyz(lid_xyz_cam0, Z, Y, X, assert_cube=False)
 
-    module = model.module if hasattr(model, "module") else model
-    forward_params = inspect.signature(module.forward).parameters
-    if "lidar_occ_mem0" in forward_params:
-        seg_e = model(
-            rgb_camXs=rgb_camXs,
-            pix_T_cams=pix_T_cams,
-            cam0_T_camXs=cam0_T_camXs,
-            vox_util=vox_util,
-            rad_occ_mem0=in_occ_mem0,
-            lidar_occ_mem0=lid_occ_mem0)
-    else:
-        seg_e = model(
-            rgb_camXs=rgb_camXs,
-            pix_T_cams=pix_T_cams,
-            cam0_T_camXs=cam0_T_camXs,
-            vox_util=vox_util,
-            rad_occ_mem0=in_occ_mem0)
+        module = model.module if hasattr(model, "module") else model
+        forward_params = inspect.signature(module.forward).parameters
+
+        # --- call the model and robustly unpack seg_e and factors ---
+        if "lidar_occ_mem0" in forward_params:
+            out = model(
+                rgb_camXs=rgb_camXs,
+                pix_T_cams=pix_T_cams,
+                cam0_T_camXs=cam0_T_camXs,
+                vox_util=vox_util,
+                rad_occ_mem0=in_occ_mem0,
+                lidar_occ_mem0=lid_occ_mem0
+            )
+        else:
+            out = model(
+                rgb_camXs=rgb_camXs,
+                pix_T_cams=pix_T_cams,
+                cam0_T_camXs=cam0_T_camXs,
+                vox_util=vox_util,
+                rad_occ_mem0=in_occ_mem0
+            )
+
+        # handle both return styles:
+        if isinstance(out, tuple) and len(out) == 2 and isinstance(out[1], dict):
+            seg_e, factors = out
+        else:
+            seg_e, factors = out, {}  # backward-compat if forward hasn't been changed yet
+
+        # safe defaults on the right device/dtype:
+        one = seg_e.new_tensor(1.0)
+        ce_factor = factors.get("ce_factor", one)
+        fc_map_factor = factors.get("fc_map_factor", one)
 
     # get bev map from masks
     if train_task == 'both' or train_task == 'map':
@@ -712,8 +727,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
         # loss calculation
         map_seg_fc_loss = map_seg_loss_fn(bev_map_mask_e, bev_map_only_mask_g)
         #   map
-        fc_map_factor = 1 / torch.exp(model.module.fc_map_weight)
-        map_seg_fc_loss = 20.0 * map_seg_fc_loss * fc_map_factor  # 20.0
+        map_seg_fc_loss = 20.0 * map_seg_fc_loss * fc_map_factor
         # add to total loss
         total_loss += map_seg_fc_loss
 
@@ -762,8 +776,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
         # clc loss
         ce_loss = loss_fn(obj_seg_bev_e, seg_bev_g, valid_bev_g)
         # obj
-        ce_factor = 1 / torch.exp(model.module.ce_weight)
-        ce_loss = 10.0 * ce_loss * ce_factor  # 10.0
+        ce_loss = 10.0 * ce_loss * ce_factor
         total_loss += ce_loss
 
         # object IoUs
@@ -789,9 +802,44 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
             wandb.log({'train/inputs/rad_occ_mem0': rad_occ_mem0_wandb}, commit=False)
 
         if use_lidar and lid_occ_mem0 is not None:
-            lid_occ_vis = sw.summ_occ('0_inputs/lid_occ_mem0', lid_occ_mem0)
-            lid_occ_vis = lid_occ_vis.squeeze().permute(1, 2, 0).numpy()
-            wandb.log({'train/inputs/lid_occ_mem0': wandb.Image(lid_occ_vis)}, commit=False)
+            # only visualize on rank 0 (prevents 8× duplicate work + syncs)
+            is_main = (not dist.is_initialized()) or (dist.get_rank() == 0)
+
+            def _as_tensor(x):
+                # unwrap (tensor, ...) or [tensor, ...]
+                if isinstance(x, (tuple, list)):
+                    x = x[0]
+                # ensure it's a Tensor on the right device
+                return x if torch.is_tensor(x) else torch.as_tensor(x, device=next(model.parameters()).device)
+
+            if is_main:
+                if isinstance(lid_occ_mem0, tuple):
+                    # VoxelNet path: (voxel_features, voxel_coords, num_voxels)
+                    _, lid_vox_coords, lid_num_vox = lid_occ_mem0
+                    if lid_vox_coords.dim() == 2:
+                        lid_vox_coords = lid_vox_coords.unsqueeze(0)
+                        lid_num_vox = lid_num_vox.unsqueeze(0)
+                    B_vis = lid_vox_coords.shape[0]
+            
+                    lid_occ_dense = torch.zeros((B_vis, 1, Z, Y, X), device=device)
+                    for b in range(B_vis):
+                        k = int(lid_num_vox[b].item())
+                        if k > 0:
+                            inds = lid_vox_coords[b, :k].long()  # (k, 3) = (Z, Y, X)
+                            inds[:, 0].clamp_(0, Z - 1)
+                            inds[:, 1].clamp_(0, Y - 1)
+                            inds[:, 2].clamp_(0, X - 1)
+                            lid_occ_dense[b, 0, inds[:, 0], inds[:, 1], inds[:, 2]] = 1.0
+                else:
+                    # Dense occupancy already; ensure it’s 5-D (B,1,Z,Y,X)
+                    lid_occ_dense = lid_occ_mem0
+                    if lid_occ_dense.dim() == 4:   # (B, Z, Y, X)
+                        lid_occ_dense = lid_occ_dense.unsqueeze(1)
+            
+                # Now visualize safely
+                lid_occ_vis = sw.summ_occ('0_inputs/lid_occ_mem0', lid_occ_dense)
+                lid_occ_vis = lid_occ_vis.squeeze().permute(1, 2, 0).numpy()
+                wandb.log({'train/inputs/lid_occ_mem0': wandb.Image(lid_occ_vis)}, commit=False)
 
         rgb_input = sw.summ_rgb('0_inputs/rgb_camXs', torch.cat(rgb_camXs[0:1].unbind(1), dim=-1))  # 1,1,3,448,4800
         rgb_input = rgb_input.squeeze().permute(1, 2, 0).numpy()  # 448,4800,3
@@ -1033,21 +1081,21 @@ def main(
     torch.cuda.empty_cache()
     device = torch.device(f"cuda:{local_rank}")
 
-    #dist.barrier()
+    dist.barrier()
     # debug only
     if torch.cuda.is_available():
         if is_master:
             print("CUDA is available")
             print("Devices available: %d " % torch.cuda.device_count())
             print("############### GPU CACHE EMPTIED ###############")
-        #dist.barrier()
+        dist.barrier()
         if is_master:  # split only for sequential printing
             print(f"\nMASTER process: rank {rank}, local_rank {local_rank}", flush=True)
         else:
             print(f"\nWORKER process: rank {rank}, local_rank {local_rank}", flush=True)
     else:
         print("CUDA is --- NOT --- available")
-    #dist.barrier()
+    dist.barrier()
 
     # autogen a name
     model_name = "%d" % B
@@ -1070,7 +1118,7 @@ def main(
     # set up ckpt and logging
     ckpt_dir = os.path.join(ckpt_dir, model_name)
 
-    #dist.barrier()
+    dist.barrier()
     if rank == 0:
         try:
             writer_t = SummaryWriter(os.path.join(log_dir, model_name, 't'), max_queue=10, flush_secs=60)
@@ -1079,7 +1127,7 @@ def main(
     else:
         writer_t = None
 
-    #dist.barrier()
+    dist.barrier()
 
     if is_master:
         print('model_name', model_name)
@@ -1226,26 +1274,6 @@ def main(
                                         is_master=is_master,
                                     )
 
-    elif model_type == 'simple_lift_fuse':
-        # our net with replaced lifting and fusion from SimpleBEV
-        model = SegnetSimpleLiftFuse(Z_cam=200, Y_cam=8, X_cam=200, Z_rad=Z, Y_rad=Y, X_rad=X, vox_util=None,
-                                     use_radar=use_radar, use_metaradar=use_metaradar,
-                                     use_shallow_metadata=use_shallow_metadata, use_radar_encoder=use_radar_encoder,
-                                     do_rgbcompress=do_rgbcompress, encoder_type=encoder_type,
-                                     radar_encoder_type=radar_encoder_type, rand_flip=rand_flip, train_task=train_task,
-                                     use_obj_layer_only_on_map=use_obj_layer_only_on_map,
-                                     do_feat_enc_dec=do_feat_enc_dec,
-                                     use_multi_scale_img_feats=use_multi_scale_img_feats, num_layers=num_layers,
-                                     latent_dim=128, use_rpn_radar=use_rpn_radar,
-                                     use_radar_occupancy_map=use_radar_occupancy_map,
-                                     freeze_dino=freeze_dino, is_master=is_master)
-
-    else:  # model_type == 'SimpleBEV_map':
-        model = SegnetWithMap(Z, Y, X, vox_util=vox_util, use_radar=use_radar,
-                              use_metaradar=use_metaradar, use_shallow_metadata=use_shallow_metadata,
-                              do_rgbcompress=do_rgbcompress, encoder_type=encoder_type, rand_flip=rand_flip,
-                              train_task=train_task, freeze_dino=freeze_dino, is_master=is_master)
-
     # DDP adaptation of BN layers
     model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = model.to(device)
@@ -1289,7 +1317,7 @@ def main(
     model = DDP(
         model,
         device_ids=[local_rank],
-        find_unused_parameters=True,          
+        find_unused_parameters=False,          
         gradient_as_bucket_view=True          
     )
 

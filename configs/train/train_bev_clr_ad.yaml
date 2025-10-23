@@ -16,7 +16,7 @@ grad_acc: 5                      # Gradient accumulation steps. Effective batch 
 lr: 0.0003                       # Peak LR for OneCycleLR (if use_scheduler=true); base LR for constant schedule otherwise.
 use_scheduler: true              # Use OneCycleLR schedule (warms up then anneals).
 weight_decay: 0.0000001          # Adam/AdamW weight decay (L2 regularization).
-nworkers: 4                      # DataLoader workers (increase until I/O saturates but avoid fork issues on your system).
+nworkers: 4                    # DataLoader workers (increase until I/O saturates but avoid fork issues on your system).
 
 # ======================
 # Directories

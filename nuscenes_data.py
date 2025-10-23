@@ -511,19 +511,24 @@ def get_rgba_map_from_mask2_on_batch(map_masks: torch.Tensor, threshold: float =
     # Compute alpha masks after thresholding.
     alpha = (map_masks > threshold).to(dtype) * a  # (B, C, H, W)
 
-    # Initialise RGBA canvas with ones to match historical behaviour.
-    rgba = torch.ones((B, 4, H, W), dtype=dtype, device=device)
+    # Compute the cumulative transmission before each layer so that compositing can be
+    # performed without an explicit Python loop. ``transmission[:, i]`` stores the
+    # remaining light (1 - accumulated alpha) before layer ``i`` is applied.
+    one = torch.ones((B, 1, H, W), dtype=dtype, device=device)
+    remaining = torch.cumprod(1 - alpha, dim=1)
+    transmission = torch.cat((one, remaining[:, :-1]), dim=1)
 
-    for layer in range(C):
-        layer_alpha = alpha[:, layer:layer + 1]  # (B, 1, H, W)
-        if torch.any(layer_alpha > 0):
-            layer_color = colors[layer].view(1, 3, 1, 1)
-            rgba_rgb = layer_color * layer_alpha
-            rgba[:, :3] = rgba[:, :3] * (1 - layer_alpha) + rgba_rgb
-            rgba[:, 3:] = rgba[:, 3:] * (1 - layer_alpha) + layer_alpha
+    # Layer contributions to RGB after accounting for their visibility and residual
+    # transmission from previously blended layers.
+    colors = colors.view(1, C, 3, 1, 1)
+    contrib_rgb = colors * alpha.unsqueeze(2) * transmission.unsqueeze(2)
+    rgb = contrib_rgb.sum(dim=1)
 
-    bev_map = rgba[:, :3]
-    return bev_map.clamp_(0.0, 1.0)
+    # Add the white background (historical behaviour) weighted by the remaining
+    # transmission after the last layer.
+    rgb += remaining[:, -1:].expand(-1, 3, -1, -1)
+
+    return rgb.clamp_(0.0, 1.0)
 
 
 class NuscData(torch.utils.data.Dataset):

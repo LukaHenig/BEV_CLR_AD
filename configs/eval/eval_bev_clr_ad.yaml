@@ -34,6 +34,7 @@ ncams: 6                         # Number of cameras per sample (nuScenes uses 6
 nsweeps: 5                       # Number of RADAR sweeps aggregated per sample.
 lidar_nsweeps: 1                 # Number of LiDAR sweeps aggregated per sample (matches training pipeline).
 grid_dim: [200, 8, 200]          # Voxel grid (Z, Y, X). Y is vertical bins; BEV plane is Z (forward) × X (right).
+half_precision_data: false       # Cast heavy BEV targets/masks/point clouds to float16 during eval or debug runs.
 
 # ======================
 # Model parameters

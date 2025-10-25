@@ -23,6 +23,7 @@ load_step: 50000
 final_dim: [448, 896]  # to match //8, //14, //16 and //32 in Vit
 ncams: 6
 nsweeps: 5
+half_precision_data: false  # Optional float16 casting for memory-friendly visualization runs.
 
 # Model parameters
 encoder_type: 'dino_v2'

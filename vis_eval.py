@@ -830,6 +830,7 @@ def main(
         freeze_dino=True,
         do_feat_enc_dec=True,
         learnable_fuse_query=True,
+        half_precision_data=False,
 ):
     assert (model_type in ['transformer', 'simple_lift_fuse', 'SimpleBEV_map'])
     B = batch_size
@@ -879,7 +880,8 @@ def main(
         custom_dataroot=custom_dataroot,
         use_obj_layer_only_on_map=use_obj_layer_only_on_map,
         vis_full_scenes=vis_full_scenes,
-        do_drn_val_split=do_drn_val_split
+        do_drn_val_split=do_drn_val_split,
+        half_precision_data=half_precision_data
     )
 
     iterloader = iter(dataloader)

@@ -768,6 +768,7 @@ def main(
         use_radar_occupancy_map=False,  # occupancy_radar_rpn
         do_drn_val_split=True,  # True
         learnable_fuse_query=True,
+        half_precision_data=False,
 ):
     print("### FINAL EVAL KWARGS ###")
     bound = inspect.signature(main).bind_partial(**locals())
@@ -828,7 +829,8 @@ def main(
         do_drn_val_split=do_drn_val_split,
         get_val_day=False,  # set 'True' for debug only
         get_val_rain=False,  # set 'True' for debug only
-        get_val_night=False  # set 'True' for debug only
+        get_val_night=False,  # set 'True' for debug only
+        half_precision_data=half_precision_data
     )
     val_iterloader = iter(val_dataloader)
 

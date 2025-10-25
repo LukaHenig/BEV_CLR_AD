@@ -528,7 +528,7 @@ class NuscData(torch.utils.data.Dataset):
                  use_obj_layer_only_on_map: bool = False, vis_full_scenes: bool = False,
                  use_radar_occupancy_map: bool = False, do_drn_val_split: bool = False, get_val_day: bool = False,
                  get_val_rain: bool = False, get_val_night: bool = False, print_details: bool = False,
-                 use_lidar: bool = False, lidar_nsweeps: int = 1):
+                 use_lidar: bool = False, lidar_nsweeps: int = 1, half_precision_data: bool = False):
         self.nusc = nusc
         self.nusc_maps = nusc_maps
         self.is_train = is_train
@@ -582,6 +582,9 @@ class NuscData(torch.utils.data.Dataset):
 
         self.use_lidar = use_lidar
         self.lidar_nsweeps = lidar_nsweeps
+
+        self.use_half_precision = half_precision_data
+        self.tensor_dtype = torch.float16 if self.use_half_precision else torch.float32
 
         XMIN, XMAX, YMIN, YMAX, ZMIN, ZMAX = self.bounds
         Z, Y, X = self.res_3d
@@ -1139,6 +1142,16 @@ class VizData(NuscData):
             seg_valid_bev = valid_bev * seg_bev
             bev_map_mask = torch.cat((bev_map_mask, seg_valid_bev), dim=0)
 
+        if self.use_half_precision:
+            seg_bev = seg_bev.to(self.tensor_dtype)
+            valid_bev = valid_bev.to(self.tensor_dtype)
+            radar_data = radar_data.to(self.tensor_dtype)
+            if lidar_data is not None:
+                lidar_data = lidar_data.to(self.tensor_dtype)
+            bev_map_mask = bev_map_mask.to(self.tensor_dtype)
+            bev_map = bev_map.to(self.tensor_dtype)
+            egocar_bev_tensor = egocar_bev_tensor.to(self.tensor_dtype)
+
         # if radar data needs preprocessing
         if self.radar_encoder_type is not None:
             rad_data = radar_data.permute(1, 0)  # R, 19
@@ -1287,7 +1300,7 @@ def compile_data(version, dataroot, data_aug_conf, centroid, bounds, res_3d, bsz
                  do_shuffle_cams=True, distributed_sampler=False, rank=None, use_pre_scaled_imgs=True,
                  custom_dataroot=None, use_obj_layer_only_on_map=False, vis_full_scenes=False,
                  use_radar_occupancy_map=False, do_drn_val_split=False, get_val_day=False, get_val_rain=False,
-                 get_val_night=False, use_lidar=False, lidar_nsweeps=1):
+                 get_val_night=False, use_lidar=False, lidar_nsweeps=1, half_precision_data: bool = False):
 
     print_details = False
     if rank == 0 or rank is None:
@@ -1324,6 +1337,7 @@ def compile_data(version, dataroot, data_aug_conf, centroid, bounds, res_3d, bsz
         use_radar_occupancy_map=use_radar_occupancy_map,
         use_lidar=use_lidar,
         lidar_nsweeps=lidar_nsweeps,
+        half_precision_data=half_precision_data,
         print_details=print_details
     )
     valdata = VizData(
@@ -1354,6 +1368,7 @@ def compile_data(version, dataroot, data_aug_conf, centroid, bounds, res_3d, bsz
         get_val_day=get_val_day,
         get_val_rain=get_val_rain,
         get_val_night=get_val_night,
+        half_precision_data=half_precision_data,
         print_details=print_details
     )
 

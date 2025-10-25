@@ -1035,6 +1035,7 @@ def main(
         use_lidar=True,
         use_lidar_encoder=True,
         use_lidar_occupancy_map=False,
+        half_precision_data=False,
         use_pre_scaled_imgs=False,
         use_obj_layer_only_on_map=False,
         init_query_with_image_feats=True,
@@ -1206,6 +1207,7 @@ def main(
         use_radar_occupancy_map=use_radar_occupancy_map,
         use_lidar=use_lidar,
         lidar_nsweeps=lidar_nsweeps,
+        half_precision_data=half_precision_data,
     )
     train_iterloader = iter(train_dataloader)
 

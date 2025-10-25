@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=96 
-#SBATCH --mem=64G         
+#SBATCH --mem=80G         
 #SBATCH --job-name=bevclr_H100_train              
 #SBATCH --output=logs_train/train_H100/%x_%j.out
 #SBATCH --chdir=/home/es/es_es/es_luheit04/forschungsprojekt/BEV_CLR_AD

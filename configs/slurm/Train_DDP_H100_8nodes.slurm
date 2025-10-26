@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=96 
-#SBATCH --mem=80G         
+#SBATCH --mem=0         
 #SBATCH --job-name=bevclr_H100_train              
 #SBATCH --output=logs_train/train_H100/%x_%j.out
 #SBATCH --chdir=/home/es/es_es/es_luheit04/forschungsprojekt/BEV_CLR_AD
@@ -54,9 +54,11 @@ cd "$PROJECT_DIR"
 torchrun --nproc_per_node=${SLURM_GPUS_ON_NODE:-8} --standalone \
   train_DDP.py --config="$CONFIG_PATH"
 
+#torchrun --nproc_per_node=8 --standalone \ train_DDP.py --config="configs/train/train_bev_clr_ad.yaml"
+
 ###########################################################################################################
 # If your already on the GPU just run the sript directly (./configs/slurm/Train_DDP_H100_8nodes.slurm)
-# important configs ( batch size = 4, nworkers = 4 , device_ids = [0,1,2,3,4,5,6,7] )
+# important configs ( batch size = 1, nworkers = 4 , device_ids = [0,1,2,3,4,5,6,7] )
 #Start: sbatch BEV_CLR_AD/configs/slurm/Train_DDP_H100_8nodes.slurm
 #Kill: scancel "JOBID"
 #See: squeue -u $USER or sacct -j "JOBID" --format=JobID,JobName,State,ExitCode,Elapsed

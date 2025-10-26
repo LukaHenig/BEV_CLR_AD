@@ -86,7 +86,7 @@ use_lidar_occupancy_map: false   # If true (and encoder supports), provide a 1-c
 # ======================
 # Misc / model plumbing
 # ======================
-device_ids: [0]                  # GPU ids used by torch.nn.DataParallel. batch_size must be divisible by len(device_ids).
+device_ids: [0,1,2,3,4,5,6,7]                  # GPU ids used by torch.nn.DataParallel. batch_size must be divisible by len(device_ids).
 freeze_dino: true                # Freeze DINO-V2 backbone (saves memory & stabilizes; unfreeze to fine-tune at a cost).
 do_feat_enc_dec: true            # Apply BEV feature encoder–decoder refinement (ResNet18-like with skips) after fusion.
 combine_feat_init_w_learned_q: true

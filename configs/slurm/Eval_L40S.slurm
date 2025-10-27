@@ -17,4 +17,4 @@
 export CUDA_VISIBLE_DEVICES=0
 export WANDB__SERVICE_WAIT=300
 
-python eval.py  --config='configs/eval/eval_bev_clr_ad.yaml'
+python eval.py  --config='configs/eval/eval_bev_clr_ad_L40S.yaml'

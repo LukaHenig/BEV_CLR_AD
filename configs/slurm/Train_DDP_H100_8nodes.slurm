@@ -45,7 +45,7 @@ export WANDB_CONSOLE=auto            # (off) for no console hijack
 
 # --- paths ---
 PROJECT_DIR="/home/es/es_es/es_luheit04/forschungsprojekt/BEV_CLR_AD"
-CONFIG_PATH="configs/train/train_bev_clr_ad.yaml"
+CONFIG_PATH="configs/train/train_bev_clr_ad_H100.yaml"
 
 cd "$PROJECT_DIR"
 

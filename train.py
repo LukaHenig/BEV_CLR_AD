@@ -23,10 +23,6 @@ import utils.improc
 import utils.misc
 import utils.vox
 import wandb
-from nets.segnet_simple_bev_with_map import SegnetWithMap
-from nets.segnet_simple_lift_fuse_ablation_new_decoders import (
-    SegnetSimpleLiftFuse,
-)
 from nets.segnet_transformer_lift_fuse_lidar import (
     SegnetTransformerLiftFuse,
 )
@@ -1249,26 +1245,26 @@ def main(
                                          use_lidar_occupancy_map=use_lidar_occupancy_map,
                                          )
 
-    elif model_type == 'simple_lift_fuse':
-        # our net with replaced lifting and fusion from SimpleBEV
-          model = SegnetSimpleLiftFuse(Z_cam=Z, Y_cam=Y, X_cam=X, Z_rad=Z, Y_rad=Y, X_rad=X, vox_util=None,
-                                      use_radar=use_radar, use_metaradar=use_metaradar,
-                                      use_shallow_metadata=use_shallow_metadata, use_radar_encoder=use_radar_encoder,
-                                      do_rgbcompress=do_rgbcompress, encoder_type=encoder_type,
-                                     radar_encoder_type=radar_encoder_type, rand_flip=rand_flip, train_task=train_task,
-                                     use_obj_layer_only_on_map=use_obj_layer_only_on_map,
-                                     do_feat_enc_dec=do_feat_enc_dec,
-                                     use_multi_scale_img_feats=use_multi_scale_img_feats, num_layers=num_layers,
-                                     latent_dim=128, use_rpn_radar=use_rpn_radar,
-                                     use_radar_occupancy_map=use_radar_occupancy_map,
-                                     use_lidar=use_lidar,
-                                     freeze_dino=freeze_dino)
-
-    else:  # model_type == 'SimpleBEV_map':
-        model = SegnetWithMap(Z, Y, X, vox_util=vox_util, use_radar=use_radar,
-                              use_metaradar=use_metaradar, use_shallow_metadata=use_shallow_metadata,
-                              do_rgbcompress=do_rgbcompress, encoder_type=encoder_type, rand_flip=rand_flip,
-                              train_task=train_task, freeze_dino=freeze_dino)
+#    elif model_type == 'simple_lift_fuse':
+#        # our net with replaced lifting and fusion from SimpleBEV
+#          model = SegnetSimpleLiftFuse(Z_cam=Z, Y_cam=Y, X_cam=X, Z_rad=Z, Y_rad=Y, X_rad=X, vox_util=None,
+#                                      use_radar=use_radar, use_metaradar=use_metaradar,
+#                                      use_shallow_metadata=use_shallow_metadata, use_radar_encoder=use_radar_encoder,
+#                                      do_rgbcompress=do_rgbcompress, encoder_type=encoder_type,
+#                                     radar_encoder_type=radar_encoder_type, rand_flip=rand_flip, train_task=train_task,
+#                                     use_obj_layer_only_on_map=use_obj_layer_only_on_map,
+#                                     do_feat_enc_dec=do_feat_enc_dec,
+#                                     use_multi_scale_img_feats=use_multi_scale_img_feats, num_layers=num_layers,
+#                                     latent_dim=128, use_rpn_radar=use_rpn_radar,
+#                                     use_radar_occupancy_map=use_radar_occupancy_map,
+#                                     use_lidar=use_lidar,
+#                                     freeze_dino=freeze_dino)
+#
+#    else:  # model_type == 'SimpleBEV_map':
+#        model = SegnetWithMap(Z, Y, X, vox_util=vox_util, use_radar=use_radar,
+#                              use_metaradar=use_metaradar, use_shallow_metadata=use_shallow_metadata,
+#                              do_rgbcompress=do_rgbcompress, encoder_type=encoder_type, rand_flip=rand_flip,
+#                              train_task=train_task, freeze_dino=freeze_dino)
 
     model = model.to(device)
     model = torch.nn.DataParallel(model, device_ids=device_ids)

@@ -524,8 +524,10 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
     seg_bev_g = seg_bev_g[:, 0]
     valid_bev_g = valid_bev_g[:, 0]
     radar_data = radar_data[:, 0]
-    if lidar_data is not None:
+    if use_lidar and lidar_data is not None:
         lidar_data = lidar_data[:, 0]
+    else:
+        lidar_data = None
     # added bev_map_gt
     bev_map_mask_g = bev_map_mask_g[:, 0]
     if use_obj_layer_only_on_map:

@@ -612,7 +612,6 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
             lid_vox_feats, lid_vox_coords, lid_num_vox = vox_util.voxelize_xyz_and_feats_voxelnet(
                 lid_xyz_cam0, lid_intensity, Z, Y, X,
                 assert_cube=False,
-                use_lidar_occupancy_map=False,
                 clean_eps=0.0, 
                 max_voxels=6000)   # e.g., 6k for LiDAR
 

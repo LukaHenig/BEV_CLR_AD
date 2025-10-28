@@ -1232,7 +1232,8 @@ class VizData(NuscData):
             all_seg_bev.append(seg_bev)
             all_valid_bev.append(valid_bev)
             all_radar_data.append(radar_data)
-            all_lidar_data.append(lidar_data)
+            if self.use_lidar:
+                all_lidar_data.append(lidar_data)
             # added bev_map_gt
             all_bev_map_mask.append(bev_map_mask)
             all_bev_map.append(bev_map)
@@ -1246,7 +1247,12 @@ class VizData(NuscData):
         all_seg_bev = torch.stack(all_seg_bev)
         all_valid_bev = torch.stack(all_valid_bev)
         all_radar_data = torch.stack(all_radar_data)
-        all_lidar_data = torch.stack(all_lidar_data)
+
+        if self.use_lidar:
+            all_lidar_data = torch.stack(all_lidar_data)
+        else:
+            # placeholder tensor so the default collate_fn can batch samples without LiDAR
+            all_lidar_data = torch.zeros(1, dtype=torch.float32)
         # added bev_map_gt
         all_bev_map_mask = torch.stack(all_bev_map_mask)
         all_bev_map = torch.stack(all_bev_map)

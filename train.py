@@ -989,7 +989,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
 def main(
         exp_name='bev_clr_ad_debug',
         # training
-        max_iters=75000,
+        max_iters=50000,
         log_freq=1000,
         shuffle=True,
         dset='trainval',
@@ -1067,7 +1067,6 @@ def main(
         print("CUDA is available")
         print("Devices available: %d " % torch.cuda.device_count())
         print("Current CUDA device ID: %d" % torch.cuda.current_device())
-        # device_ids[0])  # torch.cuda.current_device())
     else:
         print("CUDA is --- NOT --- available")
 
@@ -1256,27 +1255,6 @@ def main(
                                          use_lidar_occupancy_map=use_lidar_occupancy_map,
                                          )
 
-#    elif model_type == 'simple_lift_fuse':
-#        # our net with replaced lifting and fusion from SimpleBEV
-#          model = SegnetSimpleLiftFuse(Z_cam=Z, Y_cam=Y, X_cam=X, Z_rad=Z, Y_rad=Y, X_rad=X, vox_util=None,
-#                                      use_radar=use_radar, use_metaradar=use_metaradar,
-#                                      use_shallow_metadata=use_shallow_metadata, use_radar_encoder=use_radar_encoder,
-#                                      do_rgbcompress=do_rgbcompress, encoder_type=encoder_type,
-#                                     radar_encoder_type=radar_encoder_type, rand_flip=rand_flip, train_task=train_task,
-#                                     use_obj_layer_only_on_map=use_obj_layer_only_on_map,
-#                                     do_feat_enc_dec=do_feat_enc_dec,
-#                                     use_multi_scale_img_feats=use_multi_scale_img_feats, num_layers=num_layers,
-#                                     latent_dim=128, use_rpn_radar=use_rpn_radar,
-#                                     use_radar_occupancy_map=use_radar_occupancy_map,
-#                                     use_lidar=use_lidar,
-#                                     freeze_dino=freeze_dino)
-#
-#    else:  # model_type == 'SimpleBEV_map':
-#        model = SegnetWithMap(Z, Y, X, vox_util=vox_util, use_radar=use_radar,
-#                              use_metaradar=use_metaradar, use_shallow_metadata=use_shallow_metadata,
-#                              do_rgbcompress=do_rgbcompress, encoder_type=encoder_type, rand_flip=rand_flip,
-#                              train_task=train_task, freeze_dino=freeze_dino)
-
     model = model.to(device)
     model = torch.nn.DataParallel(model, device_ids=device_ids)
 
@@ -1286,43 +1264,6 @@ def main(
     else:
         optimizer = torch.optim.Adam(parameters, lr=lr, weight_decay=weight_decay)
         scheduler = None
-
-    # --- Warm up Lazy modules BEFORE counting params ---
-    #model.eval()
-    #with torch.no_grad():
-    #    # get one batch from your train loader
-    #    sample = next(iter(train_loader))
-#
-    #    # move tensors to the same device as the model
-    #    device = next(model.parameters()).device
-    #    def to_device(x):
-    #        if torch.is_tensor(x):
-    #            return x.to(device, non_blocking=True)
-    #        if isinstance(x, (list, tuple)):
-    #            return type(x)(to_device(t) for t in x)
-    #        if isinstance(x, dict):
-    #            return {k: to_device(v) for k, v in x.items()}
-    #        return x
-#
-    #    sample = to_device(sample)
-#
-    #    # call the model exactly like in training
-    #    try:
-    #        _ = model(**sample)   # if your forward expects keyworded batch (common)
-    #    except TypeError:
-    #        _ = model(sample)     # fallback if your forward takes a single dict/tuple
-#
-    #model.train()
-    ## --- Now it's safe to count params ---
-    #trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    #print(f'Trainable parameters: {trainable_params}')
-#
-    #non_trainable_params = sum(p.numel() for p in model.parameters() if not p.requires_grad)
-    #print(f'Non-trainable parameters: {non_trainable_params}')
-#
-    #total_params = trainable_params + non_trainable_params
-    #print('Total parameters (trainable + fixed)', total_params)
-
     
     # wandb setup watcher
     wandb.watch(model, log_freq=log_freq)

@@ -490,7 +490,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
                 assert_cube=False,
                 use_radar_occupancy_map=False,
                 clean_eps=0.0,
-                max_voxels=60000
+                max_voxels=6000
             )
             lid_occ_mem0 = (lid_vox_feats, lid_vox_coords, lid_num_vox)
     
@@ -528,7 +528,6 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
     module = model.module if hasattr(model, "module") else model
     forward_params = inspect.signature(module.forward).parameters
     
-    # 1) Forward wie im Training aufrufen
     if "lidar_occ_mem0" in forward_params:
         out = model(
             rgb_camXs=rgb_camXs,
@@ -545,13 +544,11 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
             vox_util=vox_util,
             rad_occ_mem0=in_occ_mem0)
     
-    # 2) Tuple-Return sicher entpacken (kompatibel zu alten/simplen Returns)
     if isinstance(out, tuple) and len(out) == 2 and isinstance(out[1], dict):
         seg_e, factors = out
     else:
         seg_e, factors = out, {}
     
-    # 3) Sichere Default-Faktoren auf dem richtigen Device
     one = seg_e.new_tensor(1.0)
     ce_factor = factors.get("ce_factor", one)
     fc_map_factor = factors.get("fc_map_factor", one)

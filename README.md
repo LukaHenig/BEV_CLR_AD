@@ -35,13 +35,6 @@ BEV_CLR_AD/
 └── saverloader.py, utils/     # Checkpoint and misc utility helpers.
 ```
 
----
-
-## 📔 Abstract
-
-Semantic scene segmentation from a bird's-eye-view (BEV) perspective plays a crucial role in facilitating planning and decision-making for mobile robots. Although recent vision-only methods have demonstrated notable advancements in performance, they often struggle under adverse illumination conditions such as rain or nighttime. While active sensors offer a solution to this challenge, the prohibitively high cost of LiDARs remains a limiting factor. Fusing camera data with automotive radars poses a more inexpensive alternative but has received less attention in prior research. In this work, we aim to advance this promising avenue by introducing BEVCar, a novel approach for joint BEV object and map segmentation. The core novelty of our approach lies in first learning a point-based encoding of raw radar data, which is then leveraged to efficiently initialize the lifting of image features into the BEV space. We perform extensive experiments on the nuScenes dataset and demonstrate that BEVCar outperforms the current state of the art. Moreover, we show that incorporating radar information significantly enhances robustness in challenging environmental conditions and improves segmentation performance for distant objects.
-
----
 
 ## 💾 Data preparation
 
@@ -71,8 +64,8 @@ We evaluate on the nuScenes dataset. Download the dataset from the [nuScenes web
 The project targets Python 3.10, PyTorch 2.1.2, and CUDA 11.8. A typical conda-based setup looks like:
 
 ```
-conda create --name bevcar python=3.10
-conda activate bevcar
+conda create --name bev_clr_ad python=3.10
+conda activate bev_clr_ad
 conda install pytorch=2.1.2 torchvision=0.16.2 torchaudio=2.1.2 pytorch-cuda=11.8 -c pytorch -c nvidia
 conda install pip
 conda install xformers -c xformers
@@ -92,14 +85,7 @@ cd ../..
 
 ## 📥 Pre-trained checkpoints
 
-Pretrained BEVCar checkpoints remain available for camera-only, camera–radar, and ResNet-based variants. Download the desired weights and place them under `model_checkpoints/` following this structure:
-
-```
-model_checkpoints/
-    BEVCar/model-000050000.pth
-    BEVCar_ResNet/model-000050000.pth
-    CAM_ONLY/model-000050000.pth
-```
+so far none
 
 You can also resume CLR experiments by pointing `init_dir` to an existing folder (see the configs for examples).
 
@@ -151,34 +137,8 @@ Important flags:
 
 Batch size is fixed to 1 for evaluation because the script still relies on deterministic ordering of the nuScenes samples.
 
----
 
-## 🧰 Utilities & tests
-
-* [`nuscenes_data.py`](./nuscenes_data.py) exposes helper functions for camera projection, radar/LiDAR voxelization, BEV occupancy creation, and dataset compilation. These utilities power both training and evaluation pipelines.
-* [`saverloader.py`](./saverloader.py) handles checkpoint I/O—including optimizer/scheduler state restoration when `load_optimizer`/`load_scheduler` are enabled.
-* The [`tests/`](./tests) folder ships with a Pytest suite. Run it locally via:
-
-  ```
-  pytest
-  ```
-
-  or use the convenience wrapper:
-
-  ```
-  bash scripts/run_tests.sh
-  ```
-
-The tests create light-weight stubs for nuScenes to validate geometric transforms, dataloader augmentations, and transformer fusion components without needing the full dataset.
-
----
-
-## 👩‍⚖️ License
-
-The code is released under the [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) license. For commercial inquiries, please contact the authors.
-
----
 
 ## 🙏 Acknowledgment
 
-We thank the authors of [Simple-BEV](https://github.com/aharley/simple_bev) for publicly releasing their [source code](https://github.com/aharley/simple_bev). This work was supported by Qualcomm Technologies Inc., the German Research Foundation (DFG) Emmy Noether Program grant No. 468878300, and an academic grant from NVIDIA.
+We thank the authors of [Simple-BEV](https://github.com/aharley/simple_bev) for publicly releasing their [source code](https://github.com/aharley/simple_bev).

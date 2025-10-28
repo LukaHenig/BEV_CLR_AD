@@ -136,9 +136,3 @@ Important flags:
 * Metrics are printed in tabulated form at the end of the run; TensorBoard logs are saved under `log_dir`.
 
 Batch size is fixed to 1 for evaluation because the script still relies on deterministic ordering of the nuScenes samples.
-
-
-
-## 🙏 Acknowledgment
-
-We thank the authors of [Simple-BEV](https://github.com/aharley/simple_bev) for publicly releasing their [source code](https://github.com/aharley/simple_bev).

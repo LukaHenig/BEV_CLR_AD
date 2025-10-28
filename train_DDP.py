@@ -4,8 +4,6 @@ import os
 import random
 import time
 import warnings
-# os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # may help for debugging
-# print("FIXED CUDA DEVICE: " + os.environ['CUDA_VISIBLE_DEVICES']) 
 
 import numpy as np
 import torch
@@ -648,7 +646,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
                 assert_cube=False,
                 use_radar_occupancy_map=False,
                 clean_eps=0.0,
-                max_voxels=60000  # e.g., 60k for LiDAR
+                max_voxels=6000  # e.g., 6k for LiDAR
             )
 
             # The model expects a (features, coords, num_vox) tuple
@@ -831,7 +829,17 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
                     lid_occ_dense = lid_occ_mem0
                     if lid_occ_dense.dim() == 4:   # (B, Z, Y, X)
                         lid_occ_dense = lid_occ_dense.unsqueeze(1)
+                         # quick sanity: how many active voxels?
             
+            nonzero_vox = int(lid_occ_dense.sum().item())
+            wandb.log({'debug/lidar_nonzero_voxels': nonzero_vox}, commit=False)
+
+            # optional fallback view: if empty, render a direct occupancy from raw points to verify data flow
+            if nonzero_vox == 0 and lid_xyz_cam0 is not None:
+                lid_occ_direct = vox_util.voxelize_xyz(lid_xyz_cam0, Z, Y, X, assert_cube=False)
+                lid_direct_vis = sw.summ_occ('0_inputs/lid_occ_mem0_direct', lid_occ_direct)
+                lid_direct_vis = lid_direct_vis.squeeze().permute(1, 2, 0).numpy()
+                wandb.log({'train/inputs/lid_occ_mem0_direct': wandb.Image(lid_direct_vis)}, commit=False)
                 # Now visualize safely
                 lid_occ_vis = sw.summ_occ('0_inputs/lid_occ_mem0', lid_occ_dense)
                 lid_occ_vis = lid_occ_vis.squeeze().permute(1, 2, 0).numpy()
@@ -1128,12 +1136,26 @@ def main(
     if is_master:
         print('model_name', model_name)
         print('resolution:', final_dim)
+        print('BEV map Dim:', grid_dim)
 
-        # print radar encoder
-        if use_radar_encoder:
-            print("Radar encoder: ", radar_encoder_type)
+        if use_radar:
+            print("Radar in use")
+            if use_radar_encoder:
+                print("Radar encoder: ", radar_encoder_type)
+            else:
+                print("NO RADAR ENCODER")
         else:
-            print("NO RADAR ENCODER")
+            print("NO Radar in use")
+
+
+        if use_lidar:
+            print("Lidar in use")
+            if use_lidar_encoder:
+                print("Lidar encoder: ", lidar_encoder_type)
+            else:
+                print("Lidar occupancy map in use")
+        else:
+            print("NO Lidar in use")
 
     # wandb extension
     wandb_config = {
@@ -1349,7 +1371,7 @@ def main(
             # read sample
             read_start_time = time.time()
 
-            if is_master and internal_step == grad_acc - 1:
+            if is_master and (global_step % log_freq == 0) and internal_step == grad_acc - 1:
                 sw_t = utils.improc.Summ_writer(
                     writer=writer_t,
                     global_step=global_step,

@@ -610,9 +610,9 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
             lid_vox_feats, lid_vox_coords, lid_num_vox = vox_util.voxelize_xyz_and_feats_voxelnet(
                 lid_xyz_cam0, lid_intensity, Z, Y, X,
                 assert_cube=False,
-                use_radar_occupancy_map=False,
+                use_lidar_occupancy_map=False,
                 clean_eps=0.0, 
-                max_voxels=60000)   # e.g., 60k for LiDAR
+                max_voxels=6000)   # e.g., 6k for LiDAR
 
             # keep batch dimension; the model expects a (features, coords, num_vox) tuple per batch
             lid_occ_mem0 = (lid_vox_feats, lid_vox_coords, lid_num_vox)
@@ -1092,16 +1092,26 @@ def main(
     writer_t = SummaryWriter(os.path.join(log_dir, model_name + '/t'), max_queue=10, flush_secs=60)
 
     print('resolution:', final_dim)
+    print('BEV map Dim:', grid_dim)
 
-    if use_radar_encoder:
-        print("Radar encoder: ", radar_encoder_type)
+    if use_radar:
+        print("Radar in use")
+        if use_radar_encoder:
+            print("Radar encoder: ", radar_encoder_type)
+        else:
+            print("NO RADAR ENCODER")
     else:
-        print("NO RADAR ENCODER")
+        print("NO Radar in use")
 
-    if use_lidar_encoder:
-        print("Lidar encoder: ", lidar_encoder_type)
+
+    if use_lidar:
+        print("Lidar in use")
+        if use_lidar_encoder:
+            print("Lidar encoder: ", lidar_encoder_type)
+        else:
+            print("Lidar occupancy map in use")
     else:
-        print("NO LIDAR ENCODER")
+        print("NO Lidar in use")
 
     # wandb extension
     wandb_config = {

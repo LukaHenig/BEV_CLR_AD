@@ -28,7 +28,6 @@ If you use this project in your research, please cite the BEVCar paper:
 BEV_CLR_AD/
 ├── configs/                   # Training / evaluation configs for different GPU targets.
 ├── nets/                      # Network components (transformer fusion, voxel encoders, deformable ops bindings, …).
-├── tests/                     # Pytest suite covering dataloading, evaluation, and transformer utilities.
 ├── train.py / train_DDP.py    # Entry points for DataParallel and DistributedDataParallel training.
 ├── eval.py                    # Evaluation + metric aggregation over DAY/RAIN/NIGHT splits.
 ├── nuscenes_data.py           # nuScenes dataloader with camera, radar, and LiDAR support.

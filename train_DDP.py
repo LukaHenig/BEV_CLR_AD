@@ -1373,7 +1373,7 @@ def main(
             # read sample
             read_start_time = time.time()
 
-            if is_master and (global_step % log_freq == 0) and internal_step == grad_acc - 1:
+            if is_master and internal_step == grad_acc - 1:
                 sw_t = utils.improc.Summ_writer(
                     writer=writer_t,
                     global_step=global_step,

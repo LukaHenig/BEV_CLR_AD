@@ -7,6 +7,7 @@ import inspect
 # print("FIXED CUDA DEVICE: " + os.environ['CUDA_VISIBLE_DEVICES'])
 import time
 import warnings
+import shutil
 
 import numpy as np
 import torch
@@ -106,10 +107,17 @@ def format_value(value):
 def display_final_results(train_task, dset, obj_metrics, day_metrics, rain_metrics, night_metrics,
                           map_metrics, day_map_metrics, rain_map_metrics, night_map_metrics,
                           mean_map_iou, map_ious, day_mean_map_iou, day_map_ious,
-                          rain_mean_map_iou, rain_map_ious, night_mean_map_iou, night_map_ious, do_drn_val_split):
+                          rain_mean_map_iou, rain_map_ious, night_mean_map_iou, night_map_ious,
+                          do_drn_val_split, output_path=None):
 
-    print("##################   FINAL RESULTS   ###################")
-    print("##################   OBJ IOUs  ###################")
+    output_lines: list[str] = []
+
+    def log_line(line: str = "") -> None:
+        print(line)
+        output_lines.append(line)
+
+    log_line("##################   FINAL RESULTS   ###################")
+    log_line("##################   OBJ IOUs  ###################")
     if train_task == 'both' or train_task == 'object':
         obj_data = [
             ["ALL", format_value(obj_metrics['obj_iou']), format_value(obj_metrics['obj_0_20_iou']),
@@ -129,11 +137,11 @@ def display_final_results(train_task, dset, obj_metrics, day_metrics, rain_metri
         ]
 
         headers = ["", "mean obj_IoU", "0-20m obj_IoU", "20-35m obj_IoU", "35-50m obj_IoU"]
-        print(tabulate(obj_data, headers=headers, tablefmt="pretty"))
-        print('##############################################################')
+        log_line(tabulate(obj_data, headers=headers, tablefmt="pretty"))
+        log_line('##############################################################')
 
     if train_task == 'both' or train_task == 'map':
-        print("##################   MAP IOUs (UNIFORM THRESHOLD = 40%) ###################")
+        log_line("##################   MAP IOUs (UNIFORM THRESHOLD = 40%) ###################")
         map_data = [
             ["ALL", format_value(mean_map_iou), format_value(map_ious['drivable_iou'].item()),
              format_value(map_ious['carpark_iou'].item()), format_value(map_ious['ped_cross_iou'].item()),
@@ -164,9 +172,9 @@ def display_final_results(train_task, dset, obj_metrics, day_metrics, rain_metri
 
         headers = ["", "mean map_IoU", "drivable_IoU", "carpark_IoU", "ped_cross_IoU", "walkway_IoU", "stop_line_IoU",
                    "road_divider_IoU", "lane_divider_IoU"]
-        print(tabulate(map_data, headers=headers, tablefmt="pretty"))
+        log_line(tabulate(map_data, headers=headers, tablefmt="pretty"))
 
-        print("##################   BEST MAP IOUs (CLASS-SPECIFIC THRESHOLD)  ###################")
+        log_line("##################   BEST MAP IOUs (CLASS-SPECIFIC THRESHOLD)  ###################")
         best_map_ious, best_thresholds, best_map_mean_iou = calculate_best_map_ious_and_thresholds(
             intersections=map_metrics['map_masks_multi_ious_intersections'],
             unions=map_metrics['map_masks_multi_ious_unions'],
@@ -200,9 +208,9 @@ def display_final_results(train_task, dset, obj_metrics, day_metrics, rain_metri
         headers = ["", "best map_IoU", "drivable_IoU", "carpark_IoU", "ped_cross_IoU", "walkway_IoU", "stop_line_IoU",
                    "road_divider_IoU", "lane_divider_IoU"]
 
-        print(tabulate(best_data, headers=headers, tablefmt="pretty"))
+        log_line(tabulate(best_data, headers=headers, tablefmt="pretty"))
 
-        print("##################   BEST CLASS-SPECIFIC THRESHOLD ###################")
+        log_line("##################   BEST CLASS-SPECIFIC THRESHOLD ###################")
         thresholds_data = [
             ["ALL", *(torch.round(best_thresholds*100))],
             ["DAY", *(torch.round(day_best_thresholds*100))] if do_drn_val_split
@@ -216,7 +224,14 @@ def display_final_results(train_task, dset, obj_metrics, day_metrics, rain_metri
         headers = ["", "drivable_th", "carpark_th", "ped_cross_th", "walkway_th", "stop_line_th", "road_divider_th",
                    "lane_divider_th"]
 
-        print(tabulate(thresholds_data, headers=headers, tablefmt="pretty"))
+        log_line(tabulate(thresholds_data, headers=headers, tablefmt="pretty"))
+
+    results_text = "\n".join(output_lines)
+    if output_path is not None:
+        with open(output_path, 'w') as f:
+            f.write(results_text + "\n")
+
+    return results_text
 
 
 def requires_grad(parameters: iter, flag: bool = True) -> None:
@@ -724,7 +739,7 @@ def main(
         # data/log/load directories
         data_dir='../nuscenes/',
         custom_dataroot='../../custom_nuscenes/scaled_images',
-        log_dir='logs_eval_nuscenes_bevcar',
+        log_dir='logs_eval',
         init_dir='checkpoints/bev_car',
         ignore_load=None,
         # data
@@ -763,6 +778,7 @@ def main(
         use_radar_occupancy_map=False,  # occupancy_radar_rpn
         do_drn_val_split=True,  # True
         learnable_fuse_query=True,
+        config_path=None,
 ):
     print("### FINAL EVAL KWARGS ###")
     bound = inspect.signature(main).bind_partial(**locals())
@@ -772,6 +788,9 @@ def main(
               "use_pre_scaled_imgs","grid_dim","nsweeps","lidar_nsweeps","train_task"]:
         print(f"{k} =", locals().get(k))
 
+
+    signature = inspect.signature(main)
+    config_to_save = {name: locals()[name] for name in signature.parameters}
 
     assert (model_type in ['transformer', 'simple_lift_fuse', 'SimpleBEV_map'])
     B = batch_size
@@ -785,8 +804,20 @@ def main(
     model_name = str(load_step) + '_' + exp_name
     print('model_name', model_name)
 
+    run_log_dir = os.path.join(log_dir, model_name)
+    os.makedirs(run_log_dir, exist_ok=True)
+
+    config_to_save['model_name'] = model_name
+    config_to_save['run_log_dir'] = run_log_dir
+    config_save_path = os.path.join(run_log_dir, 'config_used.yaml')
+    with open(config_save_path, 'w') as config_file:
+        yaml.safe_dump(config_to_save, config_file, sort_keys=False)
+
+    if config_path is not None and os.path.isfile(config_path):
+        shutil.copy2(config_path, os.path.join(run_log_dir, os.path.basename(config_path)))
+
     # set up logging
-    writer_ev = SummaryWriter(os.path.join(log_dir, model_name + '/ev'), max_queue=10, flush_secs=60)
+    writer_ev = SummaryWriter(os.path.join(run_log_dir, 'ev'), max_queue=10, flush_secs=60)
 
     print('resolution:', final_dim)
 
@@ -1060,7 +1091,8 @@ def main(
                     map_ious['stop_line_iou'].item(), map_ious['road_divider_iou'].item(),
                     map_ious['lane_divider_iou'].item()))
 
-    # print final metrics in terminal
+    # print final metrics in terminal and store them to disk
+    results_output_path = os.path.join(run_log_dir, 'final_results.txt')
     display_final_results(train_task=train_task, dset=dset, obj_metrics=obj_metrics, day_metrics=day_metrics,
                           rain_metrics=rain_metrics, night_metrics=night_metrics, map_metrics=map_metrics,
                           day_map_metrics=day_map_metrics, rain_map_metrics=rain_map_metrics,
@@ -1068,10 +1100,12 @@ def main(
                           day_mean_map_iou=day_mean_map_iou, day_map_ious=day_map_ious,
                           rain_mean_map_iou=rain_mean_map_iou, rain_map_ious=rain_map_ious,
                           night_mean_map_iou=night_mean_map_iou, night_map_ious=night_map_ious,
-                          do_drn_val_split=do_drn_val_split)
+                          do_drn_val_split=do_drn_val_split, output_path=results_output_path)
 
     mean_inference_time = inference_time / max_iters
     print("Mean inference time across val split: ", mean_inference_time)
+    with open(results_output_path, 'a') as results_file:
+        results_file.write(f"Mean inference time across val split: {mean_inference_time}\n")
     writer_ev.close()
 
 
@@ -1085,4 +1119,4 @@ if __name__ == '__main__':
     with open(args.config, 'r') as file:
         config = yaml.safe_load(file)
 
-    main(**config)
+    main(config_path=args.config, **config)

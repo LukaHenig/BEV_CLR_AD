@@ -790,7 +790,15 @@ def main(
 
 
     signature = inspect.signature(main)
-    config_to_save = {name: locals()[name] for name in signature.parameters}
+    local_vars = locals().copy()
+    config_to_save = {}
+    for name, parameter in signature.parameters.items():
+        if name in local_vars:
+            config_to_save[name] = local_vars[name]
+        elif parameter.default is not inspect._empty:
+            config_to_save[name] = parameter.default
+        else:
+            config_to_save[name] = None
 
     assert (model_type in ['transformer', 'simple_lift_fuse', 'SimpleBEV_map'])
     B = batch_size

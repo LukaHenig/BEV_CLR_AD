@@ -1172,7 +1172,18 @@ def main(
         "combine_feat_init_w_learned_q": combine_feat_init_w_learned_q
     }
 
-    wandb.init(project=model_name, config=wandb_config, group=group, notes=notes,  name=name)
+    wandb_resume_kwargs = {}
+    if init_dir and load_step:
+        resume_step = 0
+        if not isinstance(load_step, bool) and isinstance(load_step, int):
+            resume_step = load_step
+        previous_run_id = saverloader.get_wandb_run_id(init_dir, step=resume_step)
+        if previous_run_id is not None:
+            print(f"Resuming wandb run with id {previous_run_id}")
+            wandb_resume_kwargs = {'id': previous_run_id, 'resume': 'must'}
+
+    wandb.init(project=model_name, config=wandb_config, group=group, notes=notes, name=name,
+               **wandb_resume_kwargs)
 
     if rand_crop_and_resize:
         resize_lim = [0.8, 1.2]
@@ -1379,7 +1390,7 @@ def main(
         # save model checkpoint
         if np.mod(global_step, save_freq) == 0:
             saverloader.save(ckpt_dir, optimizer, model.module, global_step, scheduler=scheduler,
-                             keep_latest=keep_latest)
+                             keep_latest=keep_latest, wandb_run_id=getattr(wandb.run, 'id', None))
 
         model.train()
 

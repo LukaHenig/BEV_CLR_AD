@@ -6,7 +6,8 @@ import numpy as np
 import torch
 
 
-def save(ckpt_dir, optimizer, model, global_step, scheduler=None, model_ema=None, keep_latest=5, model_name='model'):
+def save(ckpt_dir, optimizer, model, global_step, scheduler=None, model_ema=None, keep_latest=5,
+         model_name='model', wandb_run_id=None):
     if not os.path.exists(ckpt_dir):
         os.makedirs(ckpt_dir)
 
@@ -23,6 +24,8 @@ def save(ckpt_dir, optimizer, model, global_step, scheduler=None, model_ema=None
         ckpt['scheduler_state_dict'] = scheduler.state_dict()
     if model_ema is not None:
         ckpt['ema_model_state_dict'] = model_ema.state_dict()
+    if wandb_run_id is not None:
+        ckpt['wandb_run_id'] = wandb_run_id
     torch.save(ckpt, model_path)
     print("saved a checkpoint: %s" % (model_path))
 
@@ -79,3 +82,38 @@ def load(ckpt_dir, model, optimizer=None, scheduler=None, model_ema=None, step=0
         else:
             print('...there is no full checkpoint here!')
     return step
+
+
+def get_wandb_run_id(ckpt_dir, step=0, model_name='model'):
+    """Fetch the stored Weights & Biases run id from a checkpoint if available.
+
+    Args:
+        ckpt_dir (str): Directory containing checkpoints.
+        step (int, optional): Specific checkpoint step to inspect. Defaults to 0 which selects the latest.
+        model_name (str, optional): Prefix of the checkpoint files. Defaults to 'model'.
+
+    Returns:
+        Optional[str]: The stored wandb run id if found, otherwise None.
+    """
+    if not os.path.exists(ckpt_dir):
+        return None
+
+    ckpt_names = [name for name in os.listdir(ckpt_dir) if name.startswith(model_name)]
+    if not ckpt_names:
+        return None
+
+    steps = [int((name.split('-')[1]).split('.')[0]) for name in ckpt_names]
+    if step == 0:
+        step = max(steps)
+
+    ckpt_filename = '%s-%09d.pth' % (model_name, step)
+    ckpt_path = os.path.join(ckpt_dir, ckpt_filename)
+    if not os.path.exists(ckpt_path):
+        return None
+
+    try:
+        checkpoint = torch.load(ckpt_path, map_location='cpu')
+    except Exception:
+        return None
+
+    return checkpoint.get('wandb_run_id')

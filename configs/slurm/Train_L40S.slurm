@@ -39,5 +39,6 @@ srun -u python train.py --config=configs/train/train_bev_clr_ad_L40S.yaml
 #Start: sbatch BEV_CLR_AD/configs/slurm/Train_L40S.slurm
 #Kill: scancel "JOBID"
 #See: squeue -u $USER or sacct -j "JOBID" --format=JobID,JobName,State,ExitCode,Elapsed
+#When does it run:  squeue --start -j "JOBID"
 ##########################################################################################
 

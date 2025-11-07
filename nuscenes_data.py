@@ -1123,7 +1123,7 @@ class VizData(NuscData):
 
         if lidar_data is not None:
             lidar_data = np.transpose(lidar_data)
-            V_lid = 50000 * self.lidar_nsweeps
+            V_lid = 6000 * self.lidar_nsweeps #keeping 50000 points to load all for sure
             if lidar_data.shape[0] > V_lid:
                 lidar_data = lidar_data[:V_lid]
             elif lidar_data.shape[0] < V_lid:

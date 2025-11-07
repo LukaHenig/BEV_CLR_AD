@@ -62,4 +62,5 @@ torchrun --nproc_per_node=${SLURM_GPUS_ON_NODE:-8} --standalone \
 #Start: sbatch BEV_CLR_AD/configs/slurm/Train_DDP_H100_8nodes.slurm
 #Kill: scancel "JOBID"
 #See: squeue -u $USER or sacct -j "JOBID" --format=JobID,JobName,State,ExitCode,Elapsed
+#When does it run:  squeue --start -j "JOBID"
 ##########################################################################################################

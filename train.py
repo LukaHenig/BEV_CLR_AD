@@ -987,9 +987,9 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
 
 
 def main(
-        exp_name='bev_clr_ad_debug',
+        exp_name='bev_clr_ad',
         # training
-        max_iters=50000,
+        max_iters=150000,
         log_freq=1000,
         shuffle=True,
         dset='trainval',

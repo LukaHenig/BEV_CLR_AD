@@ -1122,14 +1122,36 @@ class VizData(NuscData):
         radar_data = torch.from_numpy(radar_data).float()
 
         if lidar_data is not None:
-            lidar_data = np.transpose(lidar_data)
-            V_lid = 6000 * self.lidar_nsweeps #keeping 50000 points to load all for sure
+            # Ensure numpy array for consistent processing
+            if isinstance(lidar_data, torch.Tensor):
+                lidar_data = lidar_data.cpu().numpy()
+            else:
+                lidar_data = np.asarray(lidar_data)
+
+            # lidar_data originally has shape (C, N) -> make it (N, C)
+            lidar_data = lidar_data.T
+
+            # Cap / pad number of LiDAR points
+            V_lid = 8000 * self.lidar_nsweeps  # desired max number of points
+
             if lidar_data.shape[0] > V_lid:
+                # Truncate extra points
                 lidar_data = lidar_data[:V_lid]
             elif lidar_data.shape[0] < V_lid:
-                lidar_data = np.pad(lidar_data, [(0, V_lid - lidar_data.shape[0]), (0, 0)], mode='constant')
-            lidar_data = np.transpose(lidar_data)
+                # Zero-pad to fixed size along point dimension
+                pad_len = V_lid - lidar_data.shape[0]
+                lidar_data = np.pad(
+                    lidar_data,
+                    ((0, pad_len), (0, 0)),  # pad rows (points), don't pad features
+                    mode='constant'
+                )
+
+            # Back to (C, V_lid)
+            lidar_data = lidar_data.T
+
+            # Final tensor, as expected by the rest of the pipeline
             lidar_data = torch.from_numpy(lidar_data).float()
+
 
         binimg = (binimg > 0).float()
         seg_bev = (seg_bev > 0).float()

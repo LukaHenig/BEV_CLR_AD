@@ -19,5 +19,8 @@ __pycache__/
 # Build directories
 nets/ops/build/
 
+#eval results
+logs_eval/
+
 # keys 
 ssh_key*

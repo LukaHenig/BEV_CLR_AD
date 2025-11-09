@@ -451,6 +451,8 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
     metrics = {}
     total_loss = torch.tensor(0.0, requires_grad=True).to(device)
 
+    module = model.module if hasattr(model, "module") else model
+
     voxel_input_feature_buffer = None
     voxel_coordinate_buffer = None
     number_of_occupied_voxels = None
@@ -582,9 +584,9 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
         bounds=bounds,
         assert_cube=False)
 
-    if not model.module.use_radar:
+    if not module.use_radar:
         in_occ_mem0 = None
-    elif model.module.use_radar and (model.module.use_metaradar or use_shallow_metadata):
+    elif module.use_radar and (module.use_metaradar or use_shallow_metadata):
         if use_radar_encoder and radar_encoder_type == 'voxel_net':
             voxelnet_feats_mem0 = voxel_input_feature_buffer, voxel_coordinate_buffer, number_of_occupied_voxels
             in_occ_mem0 = voxelnet_feats_mem0
@@ -595,10 +597,10 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
         else:  # use_metaradar
             metarad_occ_mem0 = vox_util.voxelize_xyz_and_feats(rad_xyz_cam0, meta_rad, Z, Y, X, assert_cube=False)
             in_occ_mem0 = metarad_occ_mem0
-    elif model.module.use_radar:
+    elif module.use_radar:
         rad_occ_mem0 = vox_util.voxelize_xyz(rad_xyz_cam0, Z, Y, X, assert_cube=False)
         in_occ_mem0 = rad_occ_mem0
-    elif model.module.use_metaradar or use_shallow_metadata:
+    elif module.use_metaradar or use_shallow_metadata:
         assert False  # cannot use_metaradar without use_radar
 
     lid_occ_mem0 = None
@@ -624,8 +626,6 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
         lid_xyz_cam0 = None
 
 
-
-    module = model.module if hasattr(model, "module") else model
     forward_params = inspect.signature(module.forward).parameters
     if "lidar_occ_mem0" in forward_params:
         out = model(
@@ -716,7 +716,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
 
         # metrics
         metrics['focal_loss_map'] = map_seg_fc_loss  # .item()
-        metrics['fc_map_weight'] = model.module.fc_map_weight.item()
+        metrics['fc_map_weight'] = module.fc_map_weight.item()
         # single threshold IoUs (t=0.4)
         metrics['map_masks_intersections'] = map_intersections_per_class
         metrics['map_masks_unions'] = map_unions_per_class
@@ -794,7 +794,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
         obj_unions = obj_union.sum()
 
         metrics['ce_loss'] = ce_loss  # .item()
-        metrics['ce_weight'] = model.module.ce_weight.item()
+        metrics['ce_weight'] = module.ce_weight.item()
         metrics['obj_intersections'] = obj_intersections  # .item()
         metrics['obj_unions'] = obj_unions  # .item()
 
@@ -803,7 +803,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
         metrics['obj_iou'] = obj_iou
 
     if sw is not None and sw.save_this:
-        if model.module.use_radar:
+        if module.use_radar:
             rad_occ_mem0 = vox_util.voxelize_xyz(rad_xyz_cam0, Z, Y, X, assert_cube=False)
 
             rad_occ_mem0_wandb = sw.summ_occ('0_inputs/rad_occ_mem0', rad_occ_mem0)
@@ -1222,71 +1222,100 @@ def main(
         assert_cube=False)
 
     # set up model & losses
-    seg_loss_fn = SimpleLoss(2.13).to(device)  # value from lift-splat
-    map_seg_loss_fn = SigmoidFocalLoss(alpha=0.25, gamma=3, reduction="sum_of_class_means").to(
-        device)  # for map segmentation head
+    seg_loss_fn = SimpleLoss(2.13).to(device)
+    map_seg_loss_fn = SigmoidFocalLoss(alpha=0.25, gamma=3,
+                                       reduction="sum_of_class_means").to(device)
 
     # Transformer based lifting and fusion
     if model_type == 'transformer':
-        model = SegnetTransformerLiftFuse(Z_cam=Z, Y_cam=Y, X_cam=X, Z_rad=Z, Y_rad=Y, X_rad=X, vox_util=None,
-                                         use_radar=use_radar,
-                                         use_metaradar=use_metaradar,
-                                         use_shallow_metadata=use_shallow_metadata,
-                                         use_radar_encoder=use_radar_encoder,
-                                         do_rgbcompress=do_rgbcompress,
-                                         encoder_type=encoder_type,
-                                         radar_encoder_type=radar_encoder_type,
-                                         rand_flip=rand_flip,
-                                         train_task=train_task,
-                                         init_query_with_image_feats=init_query_with_image_feats,
-                                         use_obj_layer_only_on_map=use_obj_layer_only_on_map,
-                                         do_feat_enc_dec=do_feat_enc_dec,
-                                         use_multi_scale_img_feats=use_multi_scale_img_feats,
-                                         num_layers=num_layers,
-                                         latent_dim=128,
-                                         combine_feat_init_w_learned_q=combine_feat_init_w_learned_q,
-                                         use_rpn_radar=use_rpn_radar,
-                                         use_radar_occupancy_map=use_radar_occupancy_map,
-                                         freeze_dino=freeze_dino,
-                                         learnable_fuse_query=learnable_fuse_query,
-                                         use_lidar=use_lidar,
-                                         use_lidar_encoder=use_lidar_encoder,
-                                         lidar_encoder_type=lidar_encoder_type,                                
-                                         use_lidar_occupancy_map=use_lidar_occupancy_map,
-                                         )
+        model = SegnetTransformerLiftFuse(
+            Z_cam=Z, Y_cam=Y, X_cam=X,
+            Z_rad=Z, Y_rad=Y, X_rad=X,
+            vox_util=None,
+            use_radar=use_radar,
+            use_metaradar=use_metaradar,
+            use_shallow_metadata=use_shallow_metadata,
+            use_radar_encoder=use_radar_encoder,
+            do_rgbcompress=do_rgbcompress,
+            encoder_type=encoder_type,
+            radar_encoder_type=radar_encoder_type,
+            rand_flip=rand_flip,
+            train_task=train_task,
+            init_query_with_image_feats=init_query_with_image_feats,
+            use_obj_layer_only_on_map=use_obj_layer_only_on_map,
+            do_feat_enc_dec=do_feat_enc_dec,
+            use_multi_scale_img_feats=use_multi_scale_img_feats,
+            num_layers=num_layers,
+            latent_dim=128,
+            combine_feat_init_w_learned_q=combine_feat_init_w_learned_q,
+            use_rpn_radar=use_rpn_radar,
+            use_radar_occupancy_map=use_radar_occupancy_map,
+            freeze_dino=freeze_dino,
+            learnable_fuse_query=learnable_fuse_query,
+            use_lidar=use_lidar,
+            use_lidar_encoder=use_lidar_encoder,
+            lidar_encoder_type=lidar_encoder_type,
+            use_lidar_occupancy_map=use_lidar_occupancy_map,
+        )
 
     model = model.to(device)
-    model = torch.nn.DataParallel(model, device_ids=device_ids)
 
-    parameters = list(model.parameters())
     if use_scheduler:
         optimizer, scheduler = fetch_optimizer(lr, weight_decay, 1e-8, max_iters, model.parameters())
     else:
-        optimizer = torch.optim.Adam(parameters, lr=lr, weight_decay=weight_decay)
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
         scheduler = None
-    
-    # wandb setup watcher
-    wandb.watch(model, log_freq=log_freq)
 
-    # load checkpoint
     global_step = 0
     if init_dir:
         if load_step and load_optimizer and load_scheduler:
-            global_step = saverloader.load(init_dir, model, optimizer, scheduler=scheduler,
-                                           ignore_load=ignore_load, device_ids=device_ids, is_DP=True)
-
+            global_step = saverloader.load(
+                init_dir,
+                model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                ignore_load=ignore_load,
+                device_ids=device_ids,   
+                is_DP=False,
+            )
         elif load_step and load_optimizer:
-            global_step = saverloader.load(init_dir, model.module, optimizer, ignore_load=ignore_load,
-                                           device_ids=device_ids)
-            print("global_step: ", global_step)
+            global_step = saverloader.load(
+                init_dir,
+                model,
+                optimizer=optimizer,
+                ignore_load=ignore_load,
+                device_ids=device_ids,
+                is_DP=False,
+            )
+            print("global_step:", global_step)
         elif load_step:
-            global_step = saverloader.load(init_dir, model.module, ignore_load=ignore_load, device_ids=device_ids)
+            global_step = saverloader.load(
+                init_dir,
+                model,
+                ignore_load=ignore_load,
+                device_ids=device_ids,
+                is_DP=False,
+            )
         else:
-            _ = saverloader.load(init_dir, model.module, ignore_load=ignore_load)
+            _ = saverloader.load(
+                init_dir,
+                model,
+                ignore_load=ignore_load,
+                device_ids=device_ids,
+                is_DP=False,
+            )
             global_step = 0
         print('checkpoint loaded...')
 
+    if len(device_ids) > 1:
+        model = torch.nn.DataParallel(model, device_ids=device_ids)
+
+    parameters = list(model.parameters())
+
+    wandb.watch(model, log_freq=log_freq)
+
     model.train()
+
 
     # set up running logging pool
     n_pool_train = 10

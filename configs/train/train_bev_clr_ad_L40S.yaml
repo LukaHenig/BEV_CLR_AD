@@ -28,7 +28,7 @@ custom_dataroot: 'datasets/scaled_images'
 log_dir: 'logs_nuscenes'         # TensorBoard log root (a subfolder per run is created automatically).
 ckpt_dir: 'model_checkpoints'    # Where checkpoints are saved (a subfolder per run is created).
 keep_latest: 75                  # Keep only the latest N checkpoints (older ones are pruned).
-init_dir: ''                     # Path to a checkpoint to resume from (folder containing ckpt + meta). #model_checkpoints/BEV_CLR_AD_1x5_3e-4s_19-54-19
+init_dir: 'model_checkpoints/BEV_CLR_AD_1x5_3e-4s_11-43-47'                     # Path to a checkpoint to resume from (folder containing ckpt + meta). #model_checkpoints/BEV_CLR_AD_1x5_3e-4s_19-54-19
 ignore_load: null                # Optional list/pattern of keys to ignore when loading a checkpoint state_dict.
 load_step: true                  # When resuming, load global_step from the checkpoint (controls naming/logging).
 load_optimizer: true             # When resuming, also load optimizer state.

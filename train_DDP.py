@@ -487,6 +487,8 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
     metrics = {}
     total_loss = torch.tensor(0.0, requires_grad=True).to(device)
 
+    module = model.module if hasattr(model, "module") else model
+
     voxel_input_feature_buffer = None
     voxel_coordinate_buffer = None
     number_of_occupied_voxels = None
@@ -615,9 +617,9 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
         bounds=bounds,
         assert_cube=False)
 
-    if not model.module.use_radar:
+    if not module.use_radar:
         in_occ_mem0 = None
-    elif model.module.use_radar and (model.module.use_metaradar or use_shallow_metadata):
+    elif module.use_radar and (module.use_metaradar or use_shallow_metadata):
         if use_radar_encoder and radar_encoder_type == 'voxel_net':
             voxelnet_feats_mem0 = voxel_input_feature_buffer, voxel_coordinate_buffer, number_of_occupied_voxels
             in_occ_mem0 = voxelnet_feats_mem0
@@ -628,10 +630,10 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
         else:  # use_metaradar
             metarad_occ_mem0 = vox_util.voxelize_xyz_and_feats(rad_xyz_cam0, meta_rad, Z, Y, X, assert_cube=False)
             in_occ_mem0 = metarad_occ_mem0
-    elif model.module.use_radar:
+    elif module.use_radar:
         rad_occ_mem0 = vox_util.voxelize_xyz(rad_xyz_cam0, Z, Y, X, assert_cube=False)
         in_occ_mem0 = rad_occ_mem0
-    elif model.module.use_metaradar or use_shallow_metadata:
+    elif module.use_metaradar or use_shallow_metadata:
         assert False  # cannot use_metaradar without use_radar
 
     # --- LiDAR (VoxelNet path, mirrors train.py) ---
@@ -657,38 +659,36 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
             # Lightweight fallback: plain occupancy (not used in Option A, but keep for completeness)
             lid_occ_mem0 = vox_util.voxelize_xyz(lid_xyz_cam0, Z, Y, X, assert_cube=False)
 
-        module = model.module if hasattr(model, "module") else model
-        forward_params = inspect.signature(module.forward).parameters
+    forward_params = inspect.signature(module.forward).parameters
 
-        # --- call the model and robustly unpack seg_e and factors ---
-        if "lidar_occ_mem0" in forward_params:
-            out = model(
-                rgb_camXs=rgb_camXs,
-                pix_T_cams=pix_T_cams,
-                cam0_T_camXs=cam0_T_camXs,
-                vox_util=vox_util,
-                rad_occ_mem0=in_occ_mem0,
-                lidar_occ_mem0=lid_occ_mem0
-            )
-        else:
-            out = model(
-                rgb_camXs=rgb_camXs,
-                pix_T_cams=pix_T_cams,
-                cam0_T_camXs=cam0_T_camXs,
-                vox_util=vox_util,
-                rad_occ_mem0=in_occ_mem0
-            )
-
-        # handle both return styles:
-        if isinstance(out, tuple) and len(out) == 2 and isinstance(out[1], dict):
-            seg_e, factors = out
-        else:
-            seg_e, factors = out, {}  # backward-compat if forward hasn't been changed yet
+    # --- call the model and robustly unpack seg_e and factors ---
+    if "lidar_occ_mem0" in forward_params:
+        out = model(
+            rgb_camXs=rgb_camXs,
+            pix_T_cams=pix_T_cams,
+            cam0_T_camXs=cam0_T_camXs,
+            vox_util=vox_util,
+            rad_occ_mem0=in_occ_mem0,
+            lidar_occ_mem0=lid_occ_mem0
+        )
+    else:
+        out = model(
+            rgb_camXs=rgb_camXs,
+            pix_T_cams=pix_T_cams,
+            cam0_T_camXs=cam0_T_camXs,
+            vox_util=vox_util,
+            rad_occ_mem0=in_occ_mem0
+        )
+    # handle both return styles:
+    if isinstance(out, tuple) and len(out) == 2 and isinstance(out[1], dict):
+        seg_e, factors = out
+    else:
+        seg_e, factors = out, {}  # backward-compat if forward hasn't been changed yet
 
         # safe defaults on the right device/dtype:
-        one = seg_e.new_tensor(1.0)
-        ce_factor = factors.get("ce_factor", one)
-        fc_map_factor = factors.get("fc_map_factor", one)
+    one = seg_e.new_tensor(1.0)
+    ce_factor = factors.get("ce_factor", one)
+    fc_map_factor = factors.get("fc_map_factor", one)
 
     # get bev map from masks
     if train_task == 'both' or train_task == 'map':
@@ -751,7 +751,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
 
         # metrics
         metrics['focal_loss_map'] = map_seg_fc_loss  # .item()
-        metrics['fc_map_weight'] = model.module.fc_map_weight.item()
+        metrics['fc_map_weight'] = module.fc_map_weight.item()
         # single threshold IoUs (t=0.4)
         metrics['map_masks_intersections'] = map_intersections_per_class
         metrics['map_masks_unions'] = map_unions_per_class
@@ -784,12 +784,12 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
         obj_unions = obj_union.sum()
 
         metrics['ce_loss'] = ce_loss
-        metrics['ce_weight'] = model.module.ce_weight.item()
+        metrics['ce_weight'] = module.ce_weight.item()
         metrics['obj_intersections'] = obj_intersections
         metrics['obj_unions'] = obj_unions
 
     if sw is not None and sw.save_this and is_master:
-        if model.module.use_radar:
+        if module.use_radar:
             rad_occ_mem0 = vox_util.voxelize_xyz(rad_xyz_cam0, Z, Y, X, assert_cube=False)
 
             rad_occ_mem0_wandb = sw.summ_occ('0_inputs/rad_occ_mem0', rad_occ_mem0)
@@ -1439,7 +1439,7 @@ def main(
         # save model checkpoint
         if np.mod(global_step, save_freq) == 0:
             if rank == 0:
-                saverloader.save(ckpt_dir, optimizer, model.module, global_step, scheduler=scheduler,
+                saverloader.save(ckpt_dir, optimizer, module, global_step, scheduler=scheduler,
                              keep_latest=keep_latest)
             # wait until model is saved
             dist.barrier()

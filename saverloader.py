@@ -27,13 +27,25 @@ def save(ckpt_dir, optimizer, model, global_step, scheduler=None, model_ema=None
     print("saved a checkpoint: %s" % (model_path))
 
 
-def load(ckpt_dir, model, optimizer=None, scheduler=None, model_ema=None, step=0, model_name='model', ignore_load=None,
-         device_ids=[0], is_DP=False):
+def load(ckpt_dir,
+         model,
+         optimizer=None,
+         scheduler=None,
+         model_ema=None,
+         step=0,
+         model_name='model',
+         ignore_load=None,
+         device_ids=[0],
+         is_DP=False):
+
     print('reading ckpt from %s' % ckpt_dir)
-    if not is_DP:
-        device = device_ids  # DDP
+
+    # map_location darf KEINE Liste sein
+    if torch.cuda.is_available():
+        # nimm einfach die erste GPU aus device_ids
+        device = torch.device(f'cuda:{device_ids[0]}')
     else:
-        device = 'cuda:%d' % device_ids[0]  # DP
+        device = torch.device('cpu')
 
     if not os.path.exists(ckpt_dir):
         print('...there is no full checkpoint here!')
@@ -64,11 +76,11 @@ def load(ckpt_dir, model, optimizer=None, scheduler=None, model_ema=None, step=0
                 # 2. overwrite entries in the existing state dict
                 model_dict.update(pretrained_dict)
                 # 3. load the new state dict
-                model.load_state_dict(model_dict, strict=False)
+                model.load_state_dict(model_dict, strict=True)
 
             else:
                 checkpoint = torch.load(path, map_location=device)
-                model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+                model.load_state_dict(checkpoint['model_state_dict'], strict=True)
 
             if optimizer is not None:
                 optimizer.load_state_dict(checkpoint['optimizer_state_dict'])

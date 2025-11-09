@@ -1439,8 +1439,9 @@ def main(
         # save model checkpoint
         if np.mod(global_step, save_freq) == 0:
             if rank == 0:
-                saverloader.save(ckpt_dir, optimizer, module, global_step, scheduler=scheduler,
-                             keep_latest=keep_latest)
+                save_model = model.module if hasattr(model, "module") else model
+                saverloader.save(ckpt_dir, optimizer, save_model, global_step,
+                 scheduler=scheduler, keep_latest=keep_latest)
             # wait until model is saved
             dist.barrier()
 

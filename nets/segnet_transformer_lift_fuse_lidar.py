@@ -822,7 +822,7 @@ class SegnetTransformerLiftFuse(nn.Module):
                     reduced_zx=False,
                     output_dim=latent_dim,
                     use_radar_occupancy_map=self.use_lidar_occupancy_map,
-                    Z=self.Z_cam, Y=self.Y_cam, X=self.X_cam,  # keep as you had it
+                    Z=self.Z_rad, Y=self.Y_rad, X=self.X_rad,  # keep as you had it
                     point_feature_dim=4,
                 )
             else:
@@ -1364,7 +1364,7 @@ class SegnetTransformerLiftFuse(nn.Module):
             if rad_occ_mem0 is not None and not (self.radar_encoder_type == "voxel_net"):
                 rad_occ_mem0[self.bev_flip1_index] = torch.flip(rad_occ_mem0[self.bev_flip1_index], [-1])
                 rad_occ_mem0[self.bev_flip2_index] = torch.flip(rad_occ_mem0[self.bev_flip2_index], [-3])
-            if lidar_occ_mem0 is not None:
+            if lidar_occ_mem0 is not None and not (self.lidar_encoder_type == "voxel_net"):
                 lidar_occ_mem0[self.bev_flip1_index] = torch.flip(lidar_occ_mem0[self.bev_flip1_index], [-1])
                 lidar_occ_mem0[self.bev_flip2_index] = torch.flip(lidar_occ_mem0[self.bev_flip2_index], [-3])
 

@@ -653,6 +653,14 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
     ce_factor = factors.get("ce_factor", one)
     fc_map_factor = factors.get("fc_map_factor", one)
 
+    fusion_debug = factors.get("fusion_debug")
+    if fusion_debug:
+        for key, value in fusion_debug.items():
+            if torch.is_tensor(value):
+                metrics[key] = value.detach()
+            else:
+                metrics[key] = torch.tensor(value, device=device)
+
     # get bev map from masks
     if train_task == 'both' or train_task == 'map':
 

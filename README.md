@@ -136,26 +136,3 @@ Important flags:
 * Metrics are printed in tabulated form at the end of the run; TensorBoard logs are saved under `log_dir`.
 
 Batch size is fixed to 1 for evaluation because the script still relies on deterministic ordering of the nuScenes samples.
-
----
-
-## 🔎 Query fusion analysis workflow
-
-The LiDAR/Radar → BEV transformer exposes several knobs that determine whether camera queries dominate or whether the radar/LiDAR branch overwrites them. The model now logs dedicated diagnostics under the `fusion/…` namespace (visible in TensorBoard and W&B):
-
-* `fusion/rad_lidar_query_rms` – RMS magnitude of the radar/LiDAR query tensor passed into the fuser stage.
-* `fusion/cam_query_rms` – RMS magnitude of the camera encoder output that would initialize the BEV queries without radar/LiDAR.
-* `fusion/rad_to_cam_query_rms_ratio` – Convenience ratio (>1 ⇒ radar/LiDAR dominates, <1 ⇒ camera dominates).
-* `fusion/learned_init_query_rms` and `fusion/learned_fuse_query_rms` – Magnitude of the learnable query tensors that are added when `combine_feat_init_w_learned_q` and/or `learnable_fuse_query` are enabled.
-* `fusion/fuser_output_rms` – Norm of the fused queries after the fuser blocks.
-* Binary indicators (`fusion/use_radar_as_kv`, `fusion/learnable_fuse_query_enabled`, `fusion/combine_feat_init_w_learned_q`) that capture which plumbing options were active during the run.
-
-With these metrics available you can run a targeted sweep:
-
-1. **Baseline capture** – Train once with your current configuration (e.g., [`configs/train/train_bev_clr_ad_L40S.yaml`](./configs/train/train_bev_clr_ad_L40S.yaml)) to record the default `fusion/…` curves.
-2. **Camera-dominant probe** – Flip `use_radar_as_k_v: true` so that the camera encoder stays the query source while radar/LiDAR supply only key/value tensors. If `fusion/rad_to_cam_query_rms_ratio` drops well below 1 and metrics improve, the LiDAR/Radar branch was previously overwhelming the camera queries.
-3. **Learned-query ablations** – Toggle `combine_feat_init_w_learned_q` and `learnable_fuse_query` independently. Watch how the learned-query RMS terms evolve and whether they dwarf the feature-derived queries. This helps identify if the learned tensors are steering the fuser regardless of sensor input.
-4. **LiDAR-only sanity check** – Temporarily disable `use_radar` (keeping LiDAR enabled) to verify that LiDAR alone produces reasonable `fusion/rad_lidar_query_rms` magnitudes. If they are near zero, the LiDAR encoder likely needs more sweeps or capacity.
-5. **Interpreting ratios** – Focus on epochs where validation IoU degrades: if `fusion/rad_to_cam_query_rms_ratio` spikes while `fusion/cam_query_rms` collapses, LiDAR/Radar are overriding the geometry. Conversely, a ratio ≪1 with poor metrics indicates the added modalities are ignored, so consider decreasing `use_radar_as_k_v` or re-enabling learned fuse queries.
-
-Following this checklist makes it straightforward to decide whether to down-weight the LiDAR/Radar contribution (via `use_radar_as_k_v`, fewer fuser layers, or disabling learned queries) or to boost it (by increasing sweeps or encoder capacity) based on quantitative evidence rather than guesswork.

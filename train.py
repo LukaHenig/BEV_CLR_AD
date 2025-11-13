@@ -1,5 +1,6 @@
 import argparse
 import inspect
+import numbers
 import os
 import random
 import time
@@ -239,6 +240,15 @@ def collect_metrics_for_wandb(total_loss, metrics, mode, pool_dict,
     train_metrics_object = {}
     train_metrics_map = {}
 
+    def _as_scalar(value):
+        if torch.is_tensor(value):
+            if value.numel() == 1:
+                return value.detach().item()
+            return None
+        if isinstance(value, numbers.Number):
+            return float(value)
+        return None
+
     if mode == 'train_dp':
         # total loss
         pool_dict['loss_pool_' + pool_name].update([total_loss.item()])
@@ -321,6 +331,16 @@ def collect_metrics_for_wandb(total_loss, metrics, mode, pool_dict,
             })
             # log map metrics
             wandb.log({'DP_train_metrics_map': train_metrics_map}, commit=commit)
+
+        fusion_metrics = {}
+        for key, value in metrics.items():
+            if key.startswith('fusion/'):
+                scalar_value = _as_scalar(value)
+                if scalar_value is not None:
+                    fusion_metrics[f'debug/{key}'] = scalar_value
+
+        if fusion_metrics:
+            wandb.log(fusion_metrics, commit=commit)
 
 
 def gen_metrics(metrics: dict, train_task: str = 'both') -> None:

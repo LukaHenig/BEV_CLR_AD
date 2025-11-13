@@ -1,5 +1,6 @@
 import argparse
 import inspect
+import numbers
 import os
 import random
 import time
@@ -239,6 +240,15 @@ def collect_metrics_for_wandb(total_loss, metrics, mode, pool_dict,
     train_metrics_object = {}
     train_metrics_map = {}
 
+    def _as_scalar(value):
+        if torch.is_tensor(value):
+            if value.numel() == 1:
+                return value.detach().item()
+            return None
+        if isinstance(value, numbers.Number):
+            return float(value)
+        return None
+
     if mode == 'train_dp':
         # total loss
         pool_dict['loss_pool_' + pool_name].update([total_loss.item()])
@@ -321,6 +331,16 @@ def collect_metrics_for_wandb(total_loss, metrics, mode, pool_dict,
             })
             # log map metrics
             wandb.log({'DP_train_metrics_map': train_metrics_map}, commit=commit)
+
+        fusion_metrics = {}
+        for key, value in metrics.items():
+            if key.startswith('fusion/'):
+                scalar_value = _as_scalar(value)
+                if scalar_value is not None:
+                    fusion_metrics[f'debug/{key}'] = scalar_value
+
+        if fusion_metrics:
+            wandb.log(fusion_metrics, commit=commit)
 
 
 def gen_metrics(metrics: dict, train_task: str = 'both') -> None:
@@ -652,6 +672,14 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
     one = seg_e.new_tensor(1.0)
     ce_factor = factors.get("ce_factor", one)
     fc_map_factor = factors.get("fc_map_factor", one)
+
+    fusion_debug = factors.get("fusion_debug")
+    if fusion_debug:
+        for key, value in fusion_debug.items():
+            if torch.is_tensor(value):
+                metrics[key] = value.detach()
+            else:
+                metrics[key] = torch.tensor(value, device=device)
 
     # get bev map from masks
     if train_task == 'both' or train_task == 'map':

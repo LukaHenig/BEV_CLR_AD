@@ -988,6 +988,20 @@ class SegnetTransformerLiftFuse(nn.Module):
         B, S, C, H, W = rgb_camXs.shape
         assert (C == 3)
 
+        fusion_debug = {}
+
+        def _tensor_rms(x: torch.Tensor) -> torch.Tensor:
+            if x is None:
+                return None
+            with torch.no_grad():
+                return torch.sqrt(torch.mean(x.float() ** 2) + 1e-6)
+
+        rad_query_rms = None
+        cam_query_rms = None
+        fuse_learned_rms = None
+        fuser_out_rms = None
+        learned_init_rms = None
+
         def __p(x: torch.Tensor) -> torch.Tensor:
             # Wrapper function: e.g. unites B,S dim to B*S -> pack_seqdim: reshaping: (B,S,C,H,W) -> ([B*S],C,H,W)
             return utils.basic.pack_seqdim(x, B)
@@ -1181,6 +1195,9 @@ class SegnetTransformerLiftFuse(nn.Module):
         else:
             rad_bev_query = rad_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
 
+        if self.use_radar or self.use_lidar:
+            rad_query_rms = _tensor_rms(rad_bev_query)
+
         # #### Transformer STAGE ####
 
         if self.init_query_with_image_feats:
@@ -1232,6 +1249,7 @@ class SegnetTransformerLiftFuse(nn.Module):
             reshape(B, self.latent_dim, -1).permute(0, 2, 1)  # B, Z*X, C
         bev_queries_learned = self.bev_queries.clone().unsqueeze(0).repeat(B, 1, 1, 1).\
             reshape(B, self.latent_dim, -1).permute(0, 2, 1)  # B, Z*X, C
+        learned_init_rms = _tensor_rms(bev_queries_learned)
 
         bev_queries_fuse_pos = torch.zeros_like(bev_queries)
         bev_fuse_queries_learned = torch.zeros_like(bev_queries)
@@ -1240,6 +1258,7 @@ class SegnetTransformerLiftFuse(nn.Module):
                 .reshape(B, self.latent_dim, -1).permute(0, 2, 1)  # B, Z*X, C
             bev_fuse_queries_learned = self.bev_fuse_queries.clone().unsqueeze(0).repeat(B, 1, 1, 1).\
                 reshape(B, self.latent_dim, -1).permute(0, 2, 1)  # B, Z*X, C
+            fuse_learned_rms = _tensor_rms(bev_fuse_queries_learned)
 
         if self.use_multi_scale_img_feats:
             # collect bev keys and store spatial shapes
@@ -1313,6 +1332,8 @@ class SegnetTransformerLiftFuse(nn.Module):
 
             bev_queries = bev_queries_cam_out
 
+        cam_query_rms = _tensor_rms(bev_queries_cam_out)
+
         # fuser
         bev_queries_fuser_out = torch.zeros_like(bev_queries)
         if self.use_radar or self.use_lidar:
@@ -1350,10 +1371,13 @@ class SegnetTransformerLiftFuse(nn.Module):
                 # rad_bev_query = bev_queries_fuser_out
                 fuse_bev_queries = bev_queries_fuser_out
 
+            fuser_out_rms = _tensor_rms(bev_queries_fuser_out)
+
         if self.use_radar or self.use_lidar:
             feat_bev_ = bev_queries_fuser_out.permute(0, 2, 1).reshape(B, self.latent_dim, self.Z_cam, self.X_cam)
         else:
             feat_bev_ = bev_queries_cam_out.permute(0, 2, 1).reshape(B, self.latent_dim, self.Z_cam, self.X_cam)
+            fuser_out_rms = _tensor_rms(bev_queries_cam_out)
 
         if self.rand_flip:
             self.bev_flip1_index = np.random.choice([0, 1], B).astype(bool)
@@ -1404,5 +1428,26 @@ class SegnetTransformerLiftFuse(nn.Module):
         ce_factor = torch.exp(-self.ce_weight) if hasattr(self, "ce_weight") else None
         fc_map_factor = torch.exp(-self.fc_map_weight) if hasattr(self, "fc_map_weight") else None
         
+        if rad_query_rms is not None:
+            fusion_debug["fusion/rad_lidar_query_rms"] = rad_query_rms.detach()
+        if cam_query_rms is not None:
+            fusion_debug["fusion/cam_query_rms"] = cam_query_rms.detach()
+        if learned_init_rms is not None:
+            fusion_debug["fusion/learned_init_query_rms"] = learned_init_rms.detach()
+        if fuse_learned_rms is not None:
+            fusion_debug["fusion/learned_fuse_query_rms"] = fuse_learned_rms.detach()
+        if fuser_out_rms is not None:
+            fusion_debug["fusion/fuser_output_rms"] = fuser_out_rms.detach()
+        if rad_query_rms is not None and cam_query_rms is not None:
+            ratio = rad_query_rms / (cam_query_rms + cam_query_rms.new_tensor(1e-6))
+            fusion_debug["fusion/rad_to_cam_query_rms_ratio"] = ratio.detach()
+
+        if bev_queries is not None:
+            fusion_debug["fusion/use_radar_as_kv"] = bev_queries.new_tensor(float(self.use_radar_as_k_v))
+            fusion_debug["fusion/learnable_fuse_query_enabled"] = \
+                bev_queries.new_tensor(float(self.learnable_fuse_query))
+            fusion_debug["fusion/combine_feat_init_w_learned_q"] = \
+                bev_queries.new_tensor(float(self.combine_feat_init_w_learned_q))
+
         # return the usual output PLUS a dict of factors
-        return seg_e, {"ce_factor": ce_factor, "fc_map_factor": fc_map_factor}
+        return seg_e, {"ce_factor": ce_factor, "fc_map_factor": fc_map_factor, "fusion_debug": fusion_debug}

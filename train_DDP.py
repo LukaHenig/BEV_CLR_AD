@@ -1215,7 +1215,7 @@ def main(
     }
 
     if is_master:
-        wandb.init(project=model_name, config=wandb_config, group=group, notes=notes, name=name)
+        wandb.init(project=model_name, entity="esslingen-university", config=wandb_config, group=group, notes=notes, name=name)
     # no barrier here
 
     if rand_crop_and_resize:

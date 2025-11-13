@@ -987,7 +987,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
 
 
 def main(
-        exp_name='bev_clr_ad',
+        exp_name='BEV_CLR_AD',
         # training
         max_iters=150000,
         log_freq=1000,
@@ -1172,7 +1172,7 @@ def main(
         "combine_feat_init_w_learned_q": combine_feat_init_w_learned_q
     }
 
-    wandb.init(project=model_name, config=wandb_config, group=group, notes=notes,  name=name)
+    wandb.init(project=model_name, entity="esslingen-university", config=wandb_config, group=group, notes=notes,  name=name)
 
     if rand_crop_and_resize:
         resize_lim = [0.8, 1.2]

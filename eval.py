@@ -809,7 +809,8 @@ def main(
     device = 'cuda:%d' % device_ids[0]
     print(device)
 
-    model_name = str(load_step) + '_' + exp_name + '_' + time.strftime('%Y%m%d_%H%M%S')
+    last_part = os.path.basename(init_dir)           # only take modle name from init_dir
+    model_name = f"{str(load_step)}_{last_part}"
     print('model_name', model_name)
 
     run_log_dir = os.path.join(log_dir, model_name)

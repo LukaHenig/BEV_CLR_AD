@@ -1122,6 +1122,9 @@ def main(
     print('resolution:', final_dim)
     print('BEV map Dim:', grid_dim)
 
+    print('nsweeps (radar):', nsweeps)
+    print('nsweeps (lidar):', lidar_nsweeps)
+
     if use_radar:
         print("Radar in use")
         if use_radar_encoder:
@@ -1140,6 +1143,8 @@ def main(
             print("Lidar occupancy map in use")
     else:
         print("NO Lidar in use")
+
+    print('num_layers:', num_layers)
 
     # wandb extension
     wandb_config = {

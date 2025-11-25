@@ -21,10 +21,10 @@ data_dir: '/../../../../../../beegfs/scratch/workspace/es_luheit04-NuScneDataset
 custom_dataroot: 'datasets/scaled_images'
                                  # Optional pre-scaled images root used when use_pre_scaled_imgs=true.
 log_dir: 'logs_eval'             # TensorBoard/TensorboardX evaluation log root.
-init_dir: 'model_checkpoints/BEV_CLR_AD_1x5_3e-4s_11-33-18'
+init_dir: 'model_checkpoints/BEV_CLR_AD_1x5x8_3e-4s_13-29-17'
                                  # Directory containing the checkpoint to evaluate.
 ignore_load: null                # Optional list/pattern of keys to ignore when loading the checkpoint.
-load_step: 80000                 # Specific training step checkpoint to load (set to null to load latest).
+load_step: 35000                 # Specific training step checkpoint to load (set to null to load latest).
 
 # ======================
 # Data parameters
@@ -33,7 +33,7 @@ final_dim: [448, 896]            # (H, W) image size after processing; matches t
 ncams: 6                         # Number of cameras per sample (nuScenes uses 6).
 nsweeps: 5                       # Number of RADAR sweeps aggregated per sample.
 lidar_nsweeps: 1                 # Number of LiDAR sweeps aggregated per sample (matches training pipeline).
-grid_dim: [200, 8, 200]          # Voxel grid (Z, Y, X). Y is vertical bins; BEV plane is Z (forward) × X (right).
+grid_dim: [400, 8, 400]          # Voxel grid (Z, Y, X). Y is vertical bins; BEV plane is Z (forward) × X (right).
 
 # ======================
 # Model parameters
@@ -50,7 +50,7 @@ use_radar_occupancy_map: false   # Do not swap to occupancy-map-based radar enco
 use_metaradar: false             # Disable handcrafted radar meta features (not used with VoxelNet tuple).
 use_shallow_metadata: true       # Enable lightweight radar metadata features.
 use_lidar: true                  # Enable LiDAR branch to match training setup.
-use_lidar_encoder: false         # If false, use the lightweight “occupancy compressor”
+use_lidar_encoder: true         # If false, use the lightweight “occupancy compressor”
 use_pre_scaled_imgs: false       # Read full-resolution images and resize/augment on-the-fly.
 use_obj_layer_only_on_map: true  # Map head predicts 7 classes; object head predicts the vehicle layer.
 init_query_with_image_feats: true

@@ -1160,6 +1160,9 @@ def main(
         print('resolution:', final_dim)
         print('BEV map Dim:', grid_dim)
 
+        print('nsweeps (radar):', nsweeps)
+        print('nsweeps (lidar):', lidar_nsweeps)
+
         if use_radar:
             print("Radar in use")
             if use_radar_encoder:
@@ -1341,13 +1344,13 @@ def main(
     if init_dir:
         if load_step and load_optimizer and load_scheduler:
             global_step = saverloader.load(init_dir, model, optimizer, scheduler=scheduler,
-                                           ignore_load=ignore_load, device_ids=device, is_DP=False)
+                                           ignore_load=ignore_load, device_ids=[local_rank], is_DP=False)
         elif load_step and load_optimizer:
             global_step = saverloader.load(init_dir, model, optimizer, ignore_load=ignore_load,
-                                           device_ids=device)
+                                           device_ids=[local_rank])
             print("global_step: ", global_step)
         elif load_step:
-            global_step = saverloader.load(init_dir, model, ignore_load=ignore_load, device_ids=device)
+            global_step = saverloader.load(init_dir, model, ignore_load=ignore_load, device_ids=[local_rank])
         else:
             _ = saverloader.load(init_dir, model, ignore_load=ignore_load)
             global_step = 0

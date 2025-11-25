@@ -38,8 +38,8 @@ load_scheduler: true             # When resuming, also load scheduler state.
 # Data parameters
 # ======================
 final_dim: [448, 896]            # (H, W) image size after aug; chosen to be friendly to ViT/DINO downsample ratios.
-rand_flip: false                 # Random horizontal/vertical flips for images/BEV (the model “unflips” internally).
-rand_crop_and_resize: false      # If true, use random resize + crop in the dataloader (resize_lim controls range).
+rand_flip: true                 # Random horizontal/vertical flips for images/BEV (the model “unflips” internally).
+rand_crop_and_resize: true      # If true, use random resize + crop in the dataloader (resize_lim controls range).
 ncams: 6                         # Number of cameras per sample (nuScenes uses 6).
 nsweeps: 5                       # Number of RADAR sweeps to aggregate per sample (passed to the loader).
 lidar_nsweeps: 1                 # Number of LiDAR sweeps to aggregate per sample (used when use_lidar=true).
@@ -61,7 +61,7 @@ init_query_with_image_feats: true
 do_rgbcompress: true             # Minor convolutional compression step on 2D features (used in some paths).
 do_shuffle_cams: true            # Randomize camera order within a sample (prevents positional bias).
 use_multi_scale_img_feats: true  # Use 4/8/16/32 features as keys for cross-attention (richer, heavier).
-num_layers: 6                    # Number of transformer encoder & fuser blocks (stacked).
+num_layers: 4                    # Number of transformer encoder & fuser blocks (stacked).
 
 # ======================
 # RADAR branch

@@ -998,7 +998,7 @@ class SegnetTransformerLiftFuse(nn.Module):
 
         radar_query_rms = None
         lidar_query_rms = None
-        rad_lidar_query_rms = None
+        radar_lidar_query_rms = None
         cam_query_rms = None
         fuse_learned_rms = None
         fuser_out_rms = None
@@ -1189,20 +1189,22 @@ class SegnetTransformerLiftFuse(nn.Module):
 
         # fuse radar and LiDAR features via cross-attention
         if self.use_radar and self.use_lidar:
-            rad_bev_query = rad_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
-            lid_bev_query = lid_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
-            radar_query_rms = _tensor_rms(rad_bev_query)
-            lidar_query_rms = _tensor_rms(lid_bev_query)
-            rad_bev_query = self.radar_lidar_attention(rad_bev_query, lid_bev_query)
-            rad_lidar_query_rms = _tensor_rms(rad_bev_query)
+            radar_bev_queries = rad_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
+            lidar_bev_queries = lid_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
+            radar_query_rms = _tensor_rms(radar_bev_queries)
+            lidar_query_rms = _tensor_rms(lidar_bev_queries)
+            radar_lidar_bev_queries = self.radar_lidar_attention(radar_bev_queries, lidar_bev_queries)
+            radar_lidar_query_rms = _tensor_rms(radar_lidar_bev_queries)
         elif self.use_lidar and not self.use_radar:
-            rad_bev_query = lid_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
-            lidar_query_rms = _tensor_rms(rad_bev_query)
-            rad_lidar_query_rms = lidar_query_rms
+            lidar_bev_queries = lid_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
+            lidar_query_rms = _tensor_rms(lidar_bev_queries)
+            radar_lidar_bev_queries = lidar_bev_queries
+            radar_lidar_query_rms = lidar_query_rms
         else:
-            rad_bev_query = rad_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
-            radar_query_rms = _tensor_rms(rad_bev_query)
-            rad_lidar_query_rms = radar_query_rms
+            radar_bev_queries = rad_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
+            radar_query_rms = _tensor_rms(radar_bev_queries)
+            radar_lidar_bev_queries = radar_bev_queries
+            radar_lidar_query_rms = radar_query_rms
 
         # #### Transformer STAGE ####
 
@@ -1349,12 +1351,12 @@ class SegnetTransformerLiftFuse(nn.Module):
                     fuse_bev_queries = bev_queries_cam_out + bev_fuse_queries_learned + bev_queries_fuse_pos
                 else:
                     fuse_bev_queries = bev_queries_cam_out + bev_queries_fuse_pos
-                fusion_kv = rad_bev_query
+                fusion_kv = radar_lidar_bev_queries
             else:  # use fused radar/LiDAR as query
                 if self.combine_feat_init_w_learned_q or self.learnable_fuse_query:
-                    fuse_bev_queries = rad_bev_query + bev_fuse_queries_learned + bev_queries_fuse_pos
+                    fuse_bev_queries = radar_lidar_bev_queries + bev_fuse_queries_learned + bev_queries_fuse_pos
                 else:
-                    fuse_bev_queries = rad_bev_query + bev_queries_fuse_pos
+                    fuse_bev_queries = radar_lidar_bev_queries + bev_queries_fuse_pos
                 fusion_kv = bev_queries_cam_out
 
             for i in range(self.num_layers):
@@ -1374,7 +1376,7 @@ class SegnetTransformerLiftFuse(nn.Module):
                 # normalize (B, N, C)
                 bev_queries_fuser_out = self.norm3_layers_fuser[i](bev_queries)
 
-                # rad_bev_query = bev_queries_fuser_out
+                # radar_lidar_bev_queries = bev_queries_fuser_out
                 fuse_bev_queries = bev_queries_fuser_out
 
             fuser_out_rms = _tensor_rms(bev_queries_fuser_out)
@@ -1438,8 +1440,8 @@ class SegnetTransformerLiftFuse(nn.Module):
             fusion_debug["fusion/radar_query_rms"] = radar_query_rms.detach()
         if lidar_query_rms is not None:
             fusion_debug["fusion/lidar_query_rms"] = lidar_query_rms.detach()
-        if rad_lidar_query_rms is not None:
-            fusion_debug["fusion/rad_lidar_query_rms"] = rad_lidar_query_rms.detach()
+        if radar_lidar_query_rms is not None:
+            fusion_debug["fusion/rad_lidar_query_rms"] = radar_lidar_query_rms.detach()
         if cam_query_rms is not None:
             fusion_debug["fusion/cam_query_rms"] = cam_query_rms.detach()
         if learned_init_rms is not None:

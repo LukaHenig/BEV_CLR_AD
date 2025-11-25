@@ -822,7 +822,7 @@ class SegnetTransformerLiftFuse(nn.Module):
                     reduced_zx=False,
                     output_dim=latent_dim,
                     use_radar_occupancy_map=self.use_lidar_occupancy_map,
-                    Z=self.Z_cam, Y=self.Y_cam, X=self.X_cam,  # keep as you had it
+                    Z=self.Z_rad, Y=self.Y_rad, X=self.X_rad,  # keep as you had it
                     point_feature_dim=4,
                 )
             else:

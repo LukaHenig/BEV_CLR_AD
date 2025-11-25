@@ -1012,6 +1012,11 @@ class SegnetTransformerLiftFuse(nn.Module):
         fuse_learned_rms = None
         fuser_out_rms = None
         learned_init_rms = None
+        gate_mean = None
+        gate_std = None
+        gate_min = None
+        gate_max = None
+        gated_query_rms = None
 
         def __p(x: torch.Tensor) -> torch.Tensor:
             # Wrapper function: e.g. unites B,S dim to B*S -> pack_seqdim: reshaping: (B,S,C,H,W) -> ([B*S],C,H,W)
@@ -1259,7 +1264,13 @@ class SegnetTransformerLiftFuse(nn.Module):
             if self.use_radar and self.use_lidar and self.query_gate_mlp is not None:
                 gate_inp = torch.cat([rad_bev_q_dim, lid_bev_q_dim], dim=-1)
                 gate = self.query_gate_mlp(gate_inp)
+                with torch.no_grad():
+                    gate_mean = gate.mean(dim=(1, 2))
+                    gate_std = gate.std(dim=(1, 2))
+                    gate_min = gate.amin(dim=(1, 2))
+                    gate_max = gate.amax(dim=(1, 2))
                 fused_bev_q_dim = gate * rad_bev_q_dim + (1 - gate) * lid_bev_q_dim
+                gated_query_rms = _tensor_rms(fused_bev_q_dim)
                 bev_queries = self.image_based_query_attention(fused_bev_q_dim, img_feat_bev_q_dim)
             elif self.use_radar:
                 bev_queries = self.image_based_query_attention(rad_bev_q_dim, img_feat_bev_q_dim)
@@ -1464,6 +1475,16 @@ class SegnetTransformerLiftFuse(nn.Module):
             fusion_debug["fusion/lidar_query_rms"] = lidar_query_rms.detach()
         if radar_lidar_query_rms is not None:
             fusion_debug["fusion/rad_lidar_query_rms"] = radar_lidar_query_rms.detach()
+        if gate_mean is not None:
+            fusion_debug["fusion/query_gate_mean"] = gate_mean.detach()
+        if gate_std is not None:
+            fusion_debug["fusion/query_gate_std"] = gate_std.detach()
+        if gate_min is not None:
+            fusion_debug["fusion/query_gate_min"] = gate_min.detach()
+        if gate_max is not None:
+            fusion_debug["fusion/query_gate_max"] = gate_max.detach()
+        if gated_query_rms is not None:
+            fusion_debug["fusion/gated_query_rms"] = gated_query_rms.detach()
         if cam_query_rms is not None:
             fusion_debug["fusion/cam_query_rms"] = cam_query_rms.detach()
         if learned_init_rms is not None:

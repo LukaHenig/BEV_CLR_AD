@@ -6,7 +6,7 @@ exp_name: 'BEV_CLR_AD'           # Used to build run names, checkpoint/log folde
 # ======================
 # Training parameters
 # ======================
-max_iters: 50000                 # Total optimization steps (NOT epochs). Effective data seen depends on dataloader size.
+max_iters: 100000                 # Total optimization steps (NOT epochs). Effective data seen depends on dataloader size.
 log_freq: 100                    # How often to log scalars/images to TensorBoard/W&B (in steps).
 shuffle: true                    # Shuffle training samples each epoch (affects dataloader).
 dset: 'trainval'                 # Dataset split to load in nuscenes_data.compile_data (e.g., 'train', 'trainval', 'mini').
@@ -28,7 +28,7 @@ custom_dataroot: 'datasets/scaled_images'
 log_dir: 'logs_nuscenes'         # TensorBoard log root (a subfolder per run is created automatically).
 ckpt_dir: 'model_checkpoints'    # Where checkpoints are saved (a subfolder per run is created).
 keep_latest: 75                  # Keep only the latest N checkpoints (older ones are pruned).
-init_dir: 'model_checkpoints/BEV_CLR_AD_1x5x8_3e-4s_12-17-06'                     # Path to a checkpoint to resume from (folder containing ckpt + meta).
+init_dir: 'model_checkpoints/BEV_CLR_AD_1x5x8_3e-4s_13-29-17'                     # Path to a checkpoint to resume from (folder containing ckpt + meta).
 ignore_load: null                # Optional list/pattern of keys to ignore when loading a checkpoint state_dict.
 load_step: true                  # When resuming, load global_step from the checkpoint (controls naming/logging).
 load_optimizer: true             # When resuming, also load optimizer state.
@@ -38,8 +38,8 @@ load_scheduler: true             # When resuming, also load scheduler state.
 # Data parameters
 # ======================
 final_dim: [448, 896]            # (H, W) image size after aug; chosen to be friendly to ViT/DINO downsample ratios.
-rand_flip: false                 # Random horizontal/vertical flips for images/BEV (the model “unflips” internally).
-rand_crop_and_resize: false      # If true, use random resize + crop in the dataloader (resize_lim controls range).
+rand_flip: true                 # Random horizontal/vertical flips for images/BEV (the model “unflips” internally).
+rand_crop_and_resize: true      # If true, use random resize + crop in the dataloader (resize_lim controls range).
 ncams: 6                         # Number of cameras per sample (nuScenes uses 6).
 nsweeps: 5                       # Number of RADAR sweeps to aggregate per sample (passed to the loader).
 lidar_nsweeps: 1                 # Number of LiDAR sweeps to aggregate per sample (used when use_lidar=true).
@@ -102,4 +102,4 @@ notes: 'BEV_CLR_AD model: radar encoding, LiDAR encoding, DINO as image backbone
 6 blocks, radar init, image init, multiscale feats, enc-dec, radar and LiDAR as query for fusion,
 with learnable queries'
                                  # Free-form run notes shown in W&B UI.
-name: 'BEVCar'                   # W&B run name (shown in the project dashboard).
+name: 'BEV_CLR_AD'                   # W&B run name (shown in the project dashboard).

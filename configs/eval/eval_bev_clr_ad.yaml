@@ -21,10 +21,10 @@ data_dir: '/../../../../../../beegfs/scratch/workspace/es_luheit04-NuScneDataset
 custom_dataroot: 'datasets/scaled_images'
                                  # Optional pre-scaled images root used when use_pre_scaled_imgs=true.
 log_dir: 'logs_eval'             # TensorBoard/TensorboardX evaluation log root.
-init_dir: 'model_checkpoints/BEV_CLR_AD_1x5_3e-4s_11-30-55'
+init_dir: 'model_checkpoints/BEV_CLR_AD_1x5x8_3e-4s_13-29-17'
                                  # Directory containing the checkpoint to evaluate.
 ignore_load: null                # Optional list/pattern of keys to ignore when loading the checkpoint.
-load_step: 60000                 # Specific training step checkpoint to load (set to null to load latest).
+load_step: 35000                 # Specific training step checkpoint to load (set to null to load latest).
 
 # ======================
 # Data parameters
@@ -33,7 +33,7 @@ final_dim: [448, 896]            # (H, W) image size after processing; matches t
 ncams: 6                         # Number of cameras per sample (nuScenes uses 6).
 nsweeps: 5                       # Number of RADAR sweeps aggregated per sample.
 lidar_nsweeps: 1                 # Number of LiDAR sweeps aggregated per sample (matches training pipeline).
-grid_dim: [200, 8, 200]          # Voxel grid (Z, Y, X). Y is vertical bins; BEV plane is Z (forward) × X (right).
+grid_dim: [400, 8, 400]          # Voxel grid (Z, Y, X). Y is vertical bins; BEV plane is Z (forward) × X (right).
 
 # ======================
 # Model parameters

@@ -996,7 +996,9 @@ class SegnetTransformerLiftFuse(nn.Module):
             with torch.no_grad():
                 return torch.sqrt(torch.mean(x.float() ** 2) + 1e-6)
 
-        rad_query_rms = None
+        radar_query_rms = None
+        lidar_query_rms = None
+        rad_lidar_query_rms = None
         cam_query_rms = None
         fuse_learned_rms = None
         fuser_out_rms = None
@@ -1189,14 +1191,18 @@ class SegnetTransformerLiftFuse(nn.Module):
         if self.use_radar and self.use_lidar:
             rad_bev_query = rad_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
             lid_bev_query = lid_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
+            radar_query_rms = _tensor_rms(rad_bev_query)
+            lidar_query_rms = _tensor_rms(lid_bev_query)
             rad_bev_query = self.radar_lidar_attention(rad_bev_query, lid_bev_query)
+            rad_lidar_query_rms = _tensor_rms(rad_bev_query)
         elif self.use_lidar and not self.use_radar:
             rad_bev_query = lid_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
+            lidar_query_rms = _tensor_rms(rad_bev_query)
+            rad_lidar_query_rms = lidar_query_rms
         else:
             rad_bev_query = rad_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
-
-        if self.use_radar or self.use_lidar:
-            rad_query_rms = _tensor_rms(rad_bev_query)
+            radar_query_rms = _tensor_rms(rad_bev_query)
+            rad_lidar_query_rms = radar_query_rms
 
         # #### Transformer STAGE ####
 
@@ -1428,8 +1434,12 @@ class SegnetTransformerLiftFuse(nn.Module):
         ce_factor = torch.exp(-self.ce_weight) if hasattr(self, "ce_weight") else None
         fc_map_factor = torch.exp(-self.fc_map_weight) if hasattr(self, "fc_map_weight") else None
         
-        if rad_query_rms is not None:
-            fusion_debug["fusion/rad_lidar_query_rms"] = rad_query_rms.detach()
+        if radar_query_rms is not None:
+            fusion_debug["fusion/radar_query_rms"] = radar_query_rms.detach()
+        if lidar_query_rms is not None:
+            fusion_debug["fusion/lidar_query_rms"] = lidar_query_rms.detach()
+        if rad_lidar_query_rms is not None:
+            fusion_debug["fusion/rad_lidar_query_rms"] = rad_lidar_query_rms.detach()
         if cam_query_rms is not None:
             fusion_debug["fusion/cam_query_rms"] = cam_query_rms.detach()
         if learned_init_rms is not None:
@@ -1438,9 +1448,12 @@ class SegnetTransformerLiftFuse(nn.Module):
             fusion_debug["fusion/learned_fuse_query_rms"] = fuse_learned_rms.detach()
         if fuser_out_rms is not None:
             fusion_debug["fusion/fuser_output_rms"] = fuser_out_rms.detach()
-        if rad_query_rms is not None and cam_query_rms is not None:
-            ratio = rad_query_rms / (cam_query_rms + cam_query_rms.new_tensor(1e-6))
+        if radar_query_rms is not None and cam_query_rms is not None:
+            ratio = radar_query_rms / (cam_query_rms + cam_query_rms.new_tensor(1e-6))
             fusion_debug["fusion/rad_to_cam_query_rms_ratio"] = ratio.detach()
+        if lidar_query_rms is not None and cam_query_rms is not None:
+            ratio = lidar_query_rms / (cam_query_rms + cam_query_rms.new_tensor(1e-6))
+            fusion_debug["fusion/lidar_to_cam_query_rms_ratio"] = ratio.detach()
 
         if bev_queries is not None:
             fusion_debug["fusion/use_radar_as_kv"] = bev_queries.new_tensor(float(self.use_radar_as_k_v))

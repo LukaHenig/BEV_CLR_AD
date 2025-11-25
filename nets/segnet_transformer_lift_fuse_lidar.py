@@ -735,10 +735,19 @@ class SegnetTransformerLiftFuse(nn.Module):
         self.freeze_dino = freeze_dino
         self.learnable_fuse_query = learnable_fuse_query
         self.is_master = is_master
+        self.query_gate_mlp = None
         # --- Channel adapters (1x1 conv tails) ---
         # Auto-adaptive: creates 1x1 only if needed, otherwise Identity (no params)
         self.rad_ch_proj = AdaptiveProj(latent_dim) if self.use_radar else nn.Identity()
         self.lid_ch_proj = AdaptiveProj(latent_dim) if self.use_lidar else nn.Identity()
+
+        if self.use_radar and self.use_lidar and self.init_query_with_image_feats:
+            self.query_gate_mlp = nn.Sequential(
+                nn.Linear(latent_dim * 2, latent_dim),
+                nn.GELU(),
+                nn.Linear(latent_dim, latent_dim),
+                nn.Sigmoid(),
+            )
 
         if self.is_master:
             print("latent_dim: ", latent_dim)
@@ -1240,9 +1249,22 @@ class SegnetTransformerLiftFuse(nn.Module):
             feat_bev_q_dim = self.imgs_bev_compressor(feat_bev_)
             img_feat_bev_q_dim = feat_bev_q_dim.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
 
+            rad_bev_q_dim = None
+            lid_bev_q_dim = None
             if self.use_radar:
                 rad_bev_q_dim = rad_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
+            if self.use_lidar:
+                lid_bev_q_dim = lid_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
+
+            if self.use_radar and self.use_lidar and self.query_gate_mlp is not None:
+                gate_inp = torch.cat([rad_bev_q_dim, lid_bev_q_dim], dim=-1)
+                gate = self.query_gate_mlp(gate_inp)
+                fused_bev_q_dim = gate * rad_bev_q_dim + (1 - gate) * lid_bev_q_dim
+                bev_queries = self.image_based_query_attention(fused_bev_q_dim, img_feat_bev_q_dim)
+            elif self.use_radar:
                 bev_queries = self.image_based_query_attention(rad_bev_q_dim, img_feat_bev_q_dim)
+            elif self.use_lidar:
+                bev_queries = self.image_based_query_attention(lid_bev_q_dim, img_feat_bev_q_dim)
             else:
                 bev_queries = img_feat_bev_q_dim
 

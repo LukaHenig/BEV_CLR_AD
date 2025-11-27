@@ -493,13 +493,13 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
     # --- LiDAR -> Voxel / Occupancy vorbereiten + sanity checks ---
     lid_occ_mem0 = None
     if use_lidar and lid_xyz_cam0 is not None:
-        if use_lidar_encoder and lidar_encoder_type == 'voxel_net':
+        if use_lidar_encoder and lidar_encoder_type in ['voxel_net', 'voxel_next']:
             # Grundvoraussetzungen: Intensitäten müssen zur XYZ-Form passen
             assert lid_intensity is not None, "LiDAR intensity features required for voxel encoder"
             assert lid_xyz_cam0.shape[:2] == lid_intensity.shape[:2], \
                 f"LiDAR xyz/feat mismatch: {lid_xyz_cam0.shape} vs {lid_intensity.shape}"
     
-            # Voxelize für voxel_net: erwartet Tuple (features, coords, num_vox)
+            # Voxelize für voxel-basierte Encoder: erwartet Tuple (features, coords, num_vox)
             lid_vox_feats, lid_vox_coords, lid_num_vox = vox_util.voxelize_xyz_and_feats_voxelnet(
                 lid_xyz_cam0, lid_intensity, Z, Y, X,
                 assert_cube=False,
@@ -512,7 +512,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
             # ---------- Sanity-Guards (wichtig!) ----------
             # 1) Typ/Schnittstelle prüfen
             assert isinstance(lid_occ_mem0, tuple) and len(lid_occ_mem0) == 3, \
-                f"LiDAR voxel_net expects (features, coords, num_vox); got: {type(lid_occ_mem0)}"
+                f"LiDAR voxel encoder expects (features, coords, num_vox); got: {type(lid_occ_mem0)}"
     
             lid_vox_feats, lid_vox_coords, lid_num_vox = lid_occ_mem0
     
@@ -524,7 +524,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
     
             # 3) Belegungs-Check – schnellster Indikator, ob der Pfad "lebt"
             total_vox = int(lid_num_vox.sum().item())
-            print(f"[EVAL] LiDAR voxel_net -> occupied voxels (sum over batch): {total_vox}")
+            print(f"[EVAL] LiDAR voxel encoder -> occupied voxels (sum over batch): {total_vox}")
             # hart: wenn 0, dann ist der Pfad praktisch tot (Bounds/Kalibrierung/Units prüfen)
             assert total_vox > 0, "LiDAR produced zero occupied voxels"
     

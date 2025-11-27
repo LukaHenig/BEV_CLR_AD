@@ -19,6 +19,8 @@ from nets.dino_v2_with_adapter.dino_v2_adapter.dinov2_adapter import (
 )
 from nets.ops.modules import MSDeformAttn, MSDeformAttn3D
 from nets.voxelnet import VoxelNet
+from nets.voxelNeXt import VoxelResBackBone8xVoxelNeXt
+from nets.voxelNeXt_decoder import VoxelNeXtDecoder
 
 torch.autograd.set_detect_anomaly(False) # just for debugging purposes
 
@@ -700,7 +702,7 @@ class SegnetTransformerLiftFuse(nn.Module):
         super(SegnetTransformerLiftFuse, self).__init__()
         assert (encoder_type in ["res101", "res50", "dino_v2", "vit_s"])
         assert (radar_encoder_type in ["voxel_net", None])
-        assert (lidar_encoder_type in ["voxel_net", None])
+        assert (lidar_encoder_type in ["voxel_net", "voxel_next", None])
         assert (train_task in ["object", "map", "both"])
 
         self.Z_cam, self.Y_cam, self.X_cam = Z_cam, Y_cam, X_cam  # Z=200, Y=8, X=200
@@ -831,9 +833,18 @@ class SegnetTransformerLiftFuse(nn.Module):
                     reduced_zx=False,
                     output_dim=latent_dim,
                     use_radar_occupancy_map=self.use_lidar_occupancy_map,
-                    Z=self.Z_rad, Y=self.Y_rad, X=self.X_rad,  # keep as you had it
+                    Z=self.Z_rad, Y=self.Y_rad, X=self.X_rad,
                     point_feature_dim=4,
                 )
+            elif self.lidar_encoder_type == "voxel_next":
+                voxelnext_cfg = {"OUT_CHANNEL": latent_dim}
+                grid_size = np.array([self.Z_rad, self.Y_rad, self.X_rad], dtype=int)
+                self.lidar_encoder = VoxelResBackBone8xVoxelNeXt(
+                    model_cfg=voxelnext_cfg,
+                    input_channels=5,    # x,y,z,intensity,timestamp
+                    grid_size=grid_size,
+                )
+                
             else:
                 print("LiDAR encoder not found ")
         elif not self.use_lidar_encoder and self.use_lidar and self.is_master:
@@ -974,6 +985,52 @@ class SegnetTransformerLiftFuse(nn.Module):
                                              assert_cube=False)  # transforms mem coordinates into ref coordinates
         else:
             self.xyz_camA = None
+
+    def _voxelnet_tuple_to_spconv_inputs(
+        self,
+        voxel_features: torch.Tensor,
+        voxel_coords: torch.Tensor,
+        num_voxels: torch.Tensor,
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        """Prepare VoxelNet-style tensors for the VoxelNeXt sparse backbone.
+
+        Args:
+            voxel_features: Tensor shaped (B, K, T, C) with per-point features.
+            voxel_coords: Tensor shaped (B, K, 3) containing integer (z, y, x) coords.
+            num_voxels: Tensor shaped (B,) indicating how many voxels are valid per batch.
+
+        Returns:
+            A tuple of (features, coords) where features has shape (N, C) and coords
+            has shape (N, 4) with leading batch indices, or (None, None) if empty.
+        """
+        B, _, max_points, feat_dim = voxel_features.shape
+        all_features = []
+        all_coords = []
+
+        for b in range(B):
+            valid = int(num_voxels[b].item())
+            if valid <= 0:
+                continue
+
+            feats_b = voxel_features[b, :valid]  # (K, T, C)
+            coords_b = voxel_coords[b, :valid].int()
+
+            point_mask = feats_b.abs().sum(dim=-1) > 0
+            point_counts = point_mask.sum(dim=1, keepdim=True).clamp(min=1)
+            voxel_means = (feats_b * point_mask.unsqueeze(-1)).sum(dim=1) / point_counts
+
+            batch_inds = torch.full((valid, 1), b, dtype=coords_b.dtype, device=coords_b.device)
+            coords_with_batch = torch.cat([batch_inds, coords_b], dim=1)
+
+            all_features.append(voxel_means.reshape(-1, feat_dim))
+            all_coords.append(coords_with_batch)
+
+        if not all_features:
+            return None, None
+
+        features = torch.cat(all_features, dim=0)
+        coords = torch.cat(all_coords, dim=0)
+        return features, coords
 
     def forward(self, rgb_camXs: torch.Tensor, pix_T_cams: torch.Tensor, cam0_T_camXs: torch.Tensor,
                 vox_util: torch.Tensor, rad_occ_mem0: torch.Tensor = None, lidar_occ_mem0: torch.Tensor = None) -> torch.Tensor:
@@ -1168,6 +1225,46 @@ class SegnetTransformerLiftFuse(nn.Module):
                         number_of_occupied_voxels=lidar_occ_mem0[2],
                         dinovoxel=dinovoxel,
                     )
+                elif self.lidar_encoder_type == 'voxel_next':
+                    voxel_features, voxel_coords = self._voxelnet_tuple_to_spconv_inputs(
+                        voxel_features=lidar_occ_mem0[0],
+                        voxel_coords=lidar_occ_mem0[1],
+                        num_voxels=lidar_occ_mem0[2],
+                    )
+                    if voxel_features is None or voxel_coords is None:
+                        # Keine gültigen Voxel → leeres BEV
+                        lid_bev_ = torch.zeros((B, self.latent_dim, self.Z_rad, self.X_rad), device=device)
+                    else:
+                        batch_dict = {
+                            'voxel_features': voxel_features,   # (N_points, C_in=5)
+                            'voxel_coords': voxel_coords,       # (N_points, 4) mit batch_idx,z,y,x
+                            'batch_size': B,
+                        }
+
+                        voxelnext_out = self.lidar_encoder(batch_dict)
+                        bev_tensor = voxelnext_out['encoded_spconv_tensor'].dense()  # (B, C_backbone, Hc, Wc)
+
+                        # Falls Z/X aus Versehen vertauscht sind, korrigieren:
+                        coarse = bev_tensor
+                        if coarse.shape[2] == self.X_rad and coarse.shape[3] == self.Z_rad:
+                            coarse = coarse.permute(0, 1, 3, 2)
+
+                        Hc, Wc = coarse.shape[2], coarse.shape[3]
+                        # downsampling-Faktor grob aus X ableiten (z.B. 200/25 = 8)
+                        ds_factor = max(self.X_rad // max(Wc, 1), 1)
+
+                        # Decoder lazy anlegen und auf das richtige Device schieben
+                        if not hasattr(self, "voxelnext_decoder"):
+                            self.voxelnext_decoder = VoxelNeXtDecoder(
+                                in_channels=coarse.shape[1],
+                                latent_dim=self.latent_dim,
+                                target_z=self.Z_rad,
+                                target_x=self.X_rad,
+                                downsample_factor=ds_factor,
+                            ).to(coarse.device)
+
+                        # Grobes BEV → dichtes BEV (B, latent_dim, Z_rad, X_rad)
+                        lid_bev_ = self.voxelnext_decoder(coarse)
                 else:
                     if self.is_master:
                         print('LiDAR encoder type not supported')
@@ -1429,7 +1526,7 @@ class SegnetTransformerLiftFuse(nn.Module):
             if rad_occ_mem0 is not None and not (self.radar_encoder_type == "voxel_net"):
                 rad_occ_mem0[self.bev_flip1_index] = torch.flip(rad_occ_mem0[self.bev_flip1_index], [-1])
                 rad_occ_mem0[self.bev_flip2_index] = torch.flip(rad_occ_mem0[self.bev_flip2_index], [-3])
-            if lidar_occ_mem0 is not None and not (self.lidar_encoder_type == "voxel_net"):
+            if lidar_occ_mem0 is not None and not (self.lidar_encoder_type in ["voxel_net", "voxel_next"]):
                 lidar_occ_mem0[self.bev_flip1_index] = torch.flip(lidar_occ_mem0[self.bev_flip1_index], [-1])
                 lidar_occ_mem0[self.bev_flip2_index] = torch.flip(lidar_occ_mem0[self.bev_flip2_index], [-3])
 

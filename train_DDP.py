@@ -659,7 +659,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
     # --- LiDAR (VoxelNet path, mirrors train.py) ---
     lid_occ_mem0 = None
     if use_lidar and lid_xyz_cam0 is not None:
-        if use_lidar_encoder and lidar_encoder_type == 'voxel_net':
+        if use_lidar_encoder and lidar_encoder_type in ['voxel_net', 'voxel_next']:
             # We already built lid_intensity above as lid_data[:, :, 3:4]
             assert lid_xyz_cam0.shape[0] == lid_intensity.shape[0] and \
                    lid_xyz_cam0.shape[1] == lid_intensity.shape[1], \

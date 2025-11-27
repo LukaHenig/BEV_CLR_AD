@@ -566,7 +566,16 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
         lid_data  = lid_data[:, :lid_keep, :]
 
         xyz_lid       = lid_data[:, :, :3]
-        lid_intensity = lid_data[:, :, 3:4]            # keep if you want intensity in voxel feats
+        lid_intensity = lid_data[:, :, 3:4]  
+
+        # add a branch for voxelnext
+        if lidar_encoder_type == 'voxel_net':
+            lid_feats = lid_intensity          # 1 channel: intensity
+        elif lidar_encoder_type == 'voxel_next':
+            # include intensity and timestamp
+            lid_feats = lid_data[:, :, 3:5]    # (B, V, 2)
+        else:
+            raise ValueError(f"Unsupported lidar encoder: {lidar_encoder_type}")          
     else:
         xyz_lid = None
 
@@ -632,7 +641,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
                 f"LIDAR xyz/feat mismatch: {lid_xyz_cam0.shape} vs {lid_intensity.shape}"
 
             lid_vox_feats, lid_vox_coords, lid_num_vox = vox_util.voxelize_xyz_and_feats_voxelnet(
-                lid_xyz_cam0, lid_intensity, Z, Y, X,
+                lid_xyz_cam0, lid_feats, Z, Y, X,
                 assert_cube=False,
                 clean_eps=0.0, 
                 max_voxels=6000)   # e.g., 6k for LiDAR

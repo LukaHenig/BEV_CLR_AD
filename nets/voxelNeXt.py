@@ -13,13 +13,6 @@ and therefore requires the ``spconv`` Python package to be installed
 The forward method accepts a ``batch_dict`` containing ``voxel_features``,
 ``voxel_coords`` and ``batch_size`` and returns the same dictionary
 with an added key ``encoded_spconv_tensor`` holding the BEV feature map.
-
-Note: The original VoxelNeXt backbone fuses multiple resolution levels
-and expects additional configuration from the surrounding detection
-framework.  This implementation preserves the architecture but omits
-any lidar-radar fusion logic.  To use this backbone you will need
-``spconv`` installed with CUDA support and may need to adjust your
-training scripts to handle the sparse tensors.
 """
 
 from __future__ import annotations
@@ -107,10 +100,10 @@ def post_act_block(in_channels: int,
 
 
 class SparseBasicBlock(SparseModule):
-    """Two–layer residual block for sparse 3D convolutions.
+    """Two-layer residual block for sparse 3D convolutions.
 
     This block mirrors the basic residual building block used in the
-    VoxelNeXt backbone.  It consists of two 3×3×3 submanifold
+    VoxelNeXt backbone.  It consists of two 3x3x3 submanifold
     convolutions with BatchNorm and ReLU, plus a residual connection.
     """
 
@@ -164,7 +157,7 @@ class VoxelResBackBone8xVoxelNeXt(nn.Module):
     the VoxelNeXt paper: a sequence of six sparse convolutional blocks
     with residual connections, culminating in a 2D sparse convolution to
     produce the BEV representation.  Additional information such as
-    multi–scale features and strides is stored in the returned
+    multi-scale features and strides is stored in the returned
     ``batch_dict`` for potential downstream use.
     """
 
@@ -196,7 +189,7 @@ class VoxelResBackBone8xVoxelNeXt(nn.Module):
             nn.ReLU(),
         )
 
-        # define helper for building post–activation blocks
+        # define helper for building post-activation blocks
         block = post_act_block
 
         # residual blocks at different scales
@@ -247,7 +240,7 @@ class VoxelResBackBone8xVoxelNeXt(nn.Module):
 
         # BEV output convolution: convert from 3D sparse conv to 2D
         self.conv_out = SparseSequential(
-            # maps from conv4 channels to out_channel using a 3×3 kernel
+            # maps from conv4 channels to out_channel using a 3x3 kernel
             # after concatenating features from deeper layers in forward()
             SparseConv2d(channels[3], out_channel, 3, stride=1, padding=1, bias=False, indice_key='spconv_down2'),
             norm_fn(out_channel),
@@ -271,7 +264,7 @@ class VoxelResBackBone8xVoxelNeXt(nn.Module):
         }
 
     def bev_out(self, x_conv: SparseConvTensor) -> SparseConvTensor:
-        """Collapse the z–dimension of a sparse tensor to produce a BEV tensor.
+        """Collapse the z-dimension of a sparse tensor to produce a BEV tensor.
 
         This method aggregates features across the depth dimension and
         collapses the indices accordingly.  It follows the logic of the
@@ -332,7 +325,7 @@ class VoxelResBackBone8xVoxelNeXt(nn.Module):
         x_conv6 = self.conv6(x_conv5)
 
         # upsample conv5 and conv6 features to match conv4 resolution
-        # This is equivalent to concatenating multi–scale features as
+        # This is equivalent to concatenating multi-scale features as
         # performed in the official implementation.
         # scale conv5 indices: multiply spatial coordinates by 2
         x_conv5 = x_conv5

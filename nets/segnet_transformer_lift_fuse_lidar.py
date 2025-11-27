@@ -20,6 +20,7 @@ from nets.dino_v2_with_adapter.dino_v2_adapter.dinov2_adapter import (
 from nets.ops.modules import MSDeformAttn, MSDeformAttn3D
 from nets.voxelnet import VoxelNet
 from nets.voxelNeXt import VoxelResBackBone8xVoxelNeXt
+from nets.voxelNeXt_decoder import VoxelNeXtDecoder
 
 torch.autograd.set_detect_anomaly(False) # just for debugging purposes
 
@@ -832,7 +833,7 @@ class SegnetTransformerLiftFuse(nn.Module):
                     reduced_zx=False,
                     output_dim=latent_dim,
                     use_radar_occupancy_map=self.use_lidar_occupancy_map,
-                    Z=self.Z_rad, Y=self.Y_rad, X=self.X_rad,  # keep as you had it
+                    Z=self.Z_rad, Y=self.Y_rad, X=self.X_rad,
                     point_feature_dim=4,
                 )
             elif self.lidar_encoder_type == "voxel_next":
@@ -840,9 +841,10 @@ class SegnetTransformerLiftFuse(nn.Module):
                 grid_size = np.array([self.Z_rad, self.Y_rad, self.X_rad], dtype=int)
                 self.lidar_encoder = VoxelResBackBone8xVoxelNeXt(
                     model_cfg=voxelnext_cfg,
-                    input_channels=7,
+                    input_channels=5,    # x,y,z,intensity,timestamp
                     grid_size=grid_size,
                 )
+                
             else:
                 print("LiDAR encoder not found ")
         elif not self.use_lidar_encoder and self.use_lidar and self.is_master:
@@ -1230,25 +1232,39 @@ class SegnetTransformerLiftFuse(nn.Module):
                         num_voxels=lidar_occ_mem0[2],
                     )
                     if voxel_features is None or voxel_coords is None:
+                        # Keine gültigen Voxel → leeres BEV
                         lid_bev_ = torch.zeros((B, self.latent_dim, self.Z_rad, self.X_rad), device=device)
                     else:
                         batch_dict = {
-                            'voxel_features': voxel_features,
-                            'voxel_coords': voxel_coords,
+                            'voxel_features': voxel_features,   # (N_points, C_in=5)
+                            'voxel_coords': voxel_coords,       # (N_points, 4) mit batch_idx,z,y,x
                             'batch_size': B,
                         }
-                        voxelnext_out = self.lidar_encoder(batch_dict)
-                        bev_tensor = voxelnext_out['encoded_spconv_tensor'].dense()
 
-                        if bev_tensor.shape[2] == self.Z_rad and bev_tensor.shape[3] == self.X_rad:
-                            lid_bev_ = bev_tensor
-                        elif bev_tensor.shape[2] == self.X_rad and bev_tensor.shape[3] == self.Z_rad:
-                            lid_bev_ = bev_tensor.permute(0, 1, 3, 2)
-                        else:
-                            raise ValueError(
-                                f"Unexpected VoxelNeXt BEV shape {bev_tensor.shape}; "
-                                f"expected ({B}, C, {self.Z_rad}, {self.X_rad}) (or transposed)."
-                            )
+                        voxelnext_out = self.lidar_encoder(batch_dict)
+                        bev_tensor = voxelnext_out['encoded_spconv_tensor'].dense()  # (B, C_backbone, Hc, Wc)
+
+                        # Falls Z/X aus Versehen vertauscht sind, korrigieren:
+                        coarse = bev_tensor
+                        if coarse.shape[2] == self.X_rad and coarse.shape[3] == self.Z_rad:
+                            coarse = coarse.permute(0, 1, 3, 2)
+
+                        Hc, Wc = coarse.shape[2], coarse.shape[3]
+                        # downsampling-Faktor grob aus X ableiten (z.B. 200/25 = 8)
+                        ds_factor = max(self.X_rad // max(Wc, 1), 1)
+
+                        # Decoder lazy anlegen und auf das richtige Device schieben
+                        if not hasattr(self, "voxelnext_decoder"):
+                            self.voxelnext_decoder = VoxelNeXtDecoder(
+                                in_channels=coarse.shape[1],
+                                latent_dim=self.latent_dim,
+                                target_z=self.Z_rad,
+                                target_x=self.X_rad,
+                                downsample_factor=ds_factor,
+                            ).to(coarse.device)
+
+                        # Grobes BEV → dichtes BEV (B, latent_dim, Z_rad, X_rad)
+                        lid_bev_ = self.voxelnext_decoder(coarse)
                 else:
                     if self.is_master:
                         print('LiDAR encoder type not supported')

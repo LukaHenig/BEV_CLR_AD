@@ -6,7 +6,7 @@ exp_name: 'BEV_CLR_AD'           # Used to build run names, checkpoint/log folde
 # ======================
 # Training parameters
 # ======================
-max_iters: 100000                 # Total optimization steps (NOT epochs). Effective data seen depends on dataloader size.
+max_iters: 70000                 # Total optimization steps (NOT epochs). Effective data seen depends on dataloader size.
 log_freq: 100                    # How often to log scalars/images to TensorBoard/W&B (in steps).
 shuffle: true                    # Shuffle training samples each epoch (affects dataloader).
 dset: 'trainval'                 # Dataset split to load in nuscenes_data.compile_data (e.g., 'train', 'trainval', 'mini').
@@ -78,7 +78,7 @@ use_shallow_metadata: true       # Enable 4-ch lightweight radar meta features (
 # ======================
 # LiDAR branch
 # ======================
-lidar_encoder_type: 'voxel_net'  # LiDAR BEV encoder type when use_lidar_encoder=true ('voxel_net' or 'voxel_next').
+lidar_encoder_type: 'voxel_next'  # LiDAR BEV encoder type when use_lidar_encoder=true ('voxel_net' or 'voxel_next').
 use_lidar: true                  # Toggle LiDAR branch. (Your current data pipeline expects LiDAR present.)
 use_lidar_encoder: true          # If false, use the lightweight “occupancy compressor”
 use_lidar_occupancy_map: false   # If true (and encoder supports), provide a 1-ch LiDAR occupancy map to the encoder.

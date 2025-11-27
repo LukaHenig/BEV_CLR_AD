@@ -21,10 +21,10 @@ data_dir: '/../../../../../../beegfs/scratch/workspace/es_luheit04-NuScneDataset
 custom_dataroot: 'datasets/scaled_images'
                                  # Optional pre-scaled images root used when use_pre_scaled_imgs=true.
 log_dir: 'logs_eval'             # TensorBoard/TensorboardX evaluation log root.
-init_dir: 'model_checkpoints/BEV_CLR_AD_1x5x8_3e-4s_13-29-17'
+init_dir: 'model_checkpoints/BEV_CLR_AD_1x5x8_3e-4s_14-45-27'
                                  # Directory containing the checkpoint to evaluate.
 ignore_load: null                # Optional list/pattern of keys to ignore when loading the checkpoint.
-load_step: 35000                 # Specific training step checkpoint to load (set to null to load latest).
+load_step: 50000                 # Specific training step checkpoint to load (set to null to load latest).
 
 # ======================
 # Data parameters
@@ -40,7 +40,7 @@ grid_dim: [400, 8, 400]          # Voxel grid (Z, Y, X). Y is vertical bins; BEV
 # ======================
 encoder_type: 'dino_v2'          # Image backbone: 'dino_v2' (ViT-B/14 adapter).
 radar_encoder_type: 'voxel_net'  # RADAR BEV encoder: currently 'voxel_net' (sparse voxel feature net).
-lidar_encoder_type: 'voxel_net'  # LiDAR BEV encoder: currently 'voxel_net' (sparse voxel feature net).
+lidar_encoder_type: 'voxel_net'  # LiDAR BEV encoder: 'voxel_net' (dense) or 'voxel_next' (sparse spconv backbone).
 use_rpn_radar: false             # Keep RPN disabled as in training.
 train_task: 'both'               # Shared decoder for objects and semantic map tasks.
 use_radar: true                  # Enable RADAR branch during inference.

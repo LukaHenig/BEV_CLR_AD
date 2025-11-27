@@ -35,7 +35,6 @@ class Conv2d(nn.Module):
             return x
 
 
-# conv3d + bn + relu
 class Conv3d(nn.Module):
 
     def __init__(self, in_channels, out_channels, k, s, p, batch_norm=True):

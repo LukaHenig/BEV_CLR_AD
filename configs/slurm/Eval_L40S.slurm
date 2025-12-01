@@ -1,19 +1,35 @@
-#!/bin/bash
+#!/bin/bash -l
 #SBATCH --partition=gpu1            # oder passender GPU-Partitionname
 #SBATCH --gres=gpu:1
 #SBATCH --time=24:00:00
 #SBATCH --nodes=1
-#SBATCH --ntasks=48                   # 1 Task pro GPU
+#SBATCH --ntasks=1                  # 1 Task pro GPU
 #SBATCH --mem=64G
-#SBATCH --output=logs_train/train_L40S/%x_%j.out
-#SBATCH --job-name=bev_clr_ad_train
+#SBATCH --job-name=bev_clr_ad_eval
+#SBATCH --output=logs_eval/%x_%j.out
+#SBATCH --chdir=/home/es/es_es/es_luheit04/forschungsprojekt/BEV_CLR_AD
 
-# Lade Module oder aktiviere Umgebung
-#source ~/.bashrc
-#conda activate bev_clr_ad
-#test
-# Training starten
-#export OMP_NUM_THREADS=16
+set -e  
+
+mkdir -p logs_eval
+
+module load devel/cuda/12.4
+
+# Conda initialisieren 
+if ! command -v conda >/dev/null 2>&1; then
+  source "$HOME/miniconda3/etc/profile.d/conda.sh" 2>/dev/null || true
+  source "$HOME/anaconda3/etc/profile.d/conda.sh" 2>/dev/null || true
+fi
+
+# WICHTIG: kein -u aktiv
+conda activate bev_clr_ad
+
+# Debug
+hostname; pwd; date
+which python; python -V
+nvidia-smi || true
+
+
 export CUDA_VISIBLE_DEVICES=0
 export WANDB__SERVICE_WAIT=300
 

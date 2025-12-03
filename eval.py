@@ -567,6 +567,11 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
     one = seg_e.new_tensor(1.0)
     ce_factor = factors.get("ce_factor", one)
     fc_map_factor = factors.get("fc_map_factor", one)
+    gate_reg_loss = factors.get("gate_reg_loss")
+
+    if gate_reg_loss is not None:
+        total_loss = total_loss + gate_reg_loss
+        metrics["gate_reg_loss"] = gate_reg_loss.detach()
     
     inference_t = time.time() - start_inference_t
     # print("Inference time: ", inference_t)  # optional: pure inference timing

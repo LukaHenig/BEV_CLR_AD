@@ -698,6 +698,7 @@ class SegnetTransformerLiftFuse(nn.Module):
                  use_lidar_occupancy_map: bool = False,
                  freeze_dino: bool = True,
                  learnable_fuse_query: bool = False,
+                 gate_entropy_weight: float = 0.01,
                  is_master: bool = False):
         super(SegnetTransformerLiftFuse, self).__init__()
         assert (encoder_type in ["res101", "res50", "dino_v2", "vit_s"])
@@ -738,12 +739,17 @@ class SegnetTransformerLiftFuse(nn.Module):
         self.learnable_fuse_query = learnable_fuse_query
         self.is_master = is_master
         self.query_gate_mlp = None
+        self.gate_entropy_weight = gate_entropy_weight
+        self.rad_gate_norm = None
+        self.lid_gate_norm = None
         # --- Channel adapters (1x1 conv tails) ---
         # Auto-adaptive: creates 1x1 only if needed, otherwise Identity (no params)
         self.rad_ch_proj = AdaptiveProj(latent_dim) if self.use_radar else nn.Identity()
         self.lid_ch_proj = AdaptiveProj(latent_dim) if self.use_lidar else nn.Identity()
 
         if self.use_radar and self.use_lidar and self.init_query_with_image_feats:
+            self.rad_gate_norm = nn.LayerNorm(latent_dim)
+            self.lid_gate_norm = nn.LayerNorm(latent_dim)
             self.query_gate_mlp = nn.Sequential(
                 nn.Linear(latent_dim * 2, latent_dim),
                 nn.GELU(),
@@ -1073,6 +1079,7 @@ class SegnetTransformerLiftFuse(nn.Module):
         gate_std = None
         gate_min = None
         gate_max = None
+        gate_reg_loss = rgb_camXs.new_zeros(())
         gated_query_rms = None
 
         def __p(x: torch.Tensor) -> torch.Tensor:
@@ -1359,8 +1366,13 @@ class SegnetTransformerLiftFuse(nn.Module):
                 lid_bev_q_dim = lid_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
 
             if self.use_radar and self.use_lidar and self.query_gate_mlp is not None:
-                gate_inp = torch.cat([rad_bev_q_dim, lid_bev_q_dim], dim=-1)
+                gate_inp = torch.cat([
+                    self.rad_gate_norm(rad_bev_q_dim),
+                    self.lid_gate_norm(lid_bev_q_dim),
+                ], dim=-1)
                 gate = self.query_gate_mlp(gate_inp)
+                gate_entropy = gate * torch.log(gate + 1e-6) + (1 - gate) * torch.log(1 - gate + 1e-6)
+                gate_reg_loss = -gate_entropy.mean() * self.gate_entropy_weight
                 with torch.no_grad():
                     gate_mean = gate.mean(dim=(1, 2))
                     gate_std = gate.std(dim=(1, 2))
@@ -1605,4 +1617,5 @@ class SegnetTransformerLiftFuse(nn.Module):
                 bev_queries.new_tensor(float(self.combine_feat_init_w_learned_q))
 
         # return the usual output PLUS a dict of factors
-        return seg_e, {"ce_factor": ce_factor, "fc_map_factor": fc_map_factor, "fusion_debug": fusion_debug}
+        return seg_e, {"ce_factor": ce_factor, "fc_map_factor": fc_map_factor,
+                       "gate_reg_loss": gate_reg_loss, "fusion_debug": fusion_debug}

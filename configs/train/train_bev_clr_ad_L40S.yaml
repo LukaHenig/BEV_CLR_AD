@@ -61,7 +61,7 @@ init_query_with_image_feats: true
 do_rgbcompress: true             # Minor convolutional compression step on 2D features (used in some paths).
 do_shuffle_cams: true            # Randomize camera order within a sample (prevents positional bias).
 use_multi_scale_img_feats: true  # Use 4/8/16/32 features as keys for cross-attention (richer, heavier).
-num_layers: 7                    # Number of transformer encoder & fuser blocks (stacked).
+num_layers: 5                   # Number of transformer encoder & fuser blocks (stacked).
 
 # ======================
 # RADAR branch

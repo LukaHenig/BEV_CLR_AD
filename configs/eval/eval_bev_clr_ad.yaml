@@ -21,10 +21,10 @@ data_dir: '/../../../../../../beegfs/scratch/workspace/es_luheit04-NuScneDataset
 custom_dataroot: 'datasets/scaled_images'
                                  # Optional pre-scaled images root used when use_pre_scaled_imgs=true.
 log_dir: 'logs_eval'             # TensorBoard/TensorboardX evaluation log root.
-init_dir: 'model_checkpoints/BEV_CLR_AD_1x5_3e-4s_18-48-54'
+init_dir: 'model_checkpoints/BEV_CLR_AD_1x5_3e-4s_09-02-37'
                                  # Directory containing the checkpoint to evaluate.
 ignore_load: null                # Optional list/pattern of keys to ignore when loading the checkpoint.
-load_step: 70000                 # Specific training step checkpoint to load (set to null to load latest).
+load_step: 35000                 # Specific training step checkpoint to load (set to null to load latest).
 
 # ======================
 # Data parameters
@@ -57,7 +57,7 @@ init_query_with_image_feats: true
                                  # Initialize BEV queries using lifted multi-view image features.
 do_rgbcompress: true             # Apply minor convolutional compression on 2D features.
 use_multi_scale_img_feats: true  # Use 4/8/16/32 features as keys for cross-attention (richer, heavier).
-num_layers: 6                    # Number of transformer encoder & fuser blocks (stacked).
+num_layers: 7                    # Number of transformer encoder & fuser blocks (stacked).
 
 # ======================
 # Misc / model plumbing

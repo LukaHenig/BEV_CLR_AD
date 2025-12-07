@@ -695,6 +695,8 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
             else:
                 metrics[key] = torch.tensor(value, device=device)
 
+    bev_debug = factors.get("bev_debug")
+
     # get bev map from masks
     if train_task == 'both' or train_task == 'map':
 
@@ -843,6 +845,28 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
         # calc ious:
         obj_iou = obj_intersections/(obj_unions + 1e-4)
         metrics['obj_iou'] = obj_iou
+
+    bev_debug_freq = 100
+    if sw is not None and bev_debug and (sw.global_step % bev_debug_freq == 0):
+        def _bev_to_image(bev_tensor):
+            bev_slice = bev_tensor.mean(dim=1, keepdim=True)
+            bev_vis = utils.improc.oned2inferno(bev_slice, norm=True)
+            return bev_vis[0].permute(1, 2, 0).detach().cpu().numpy()
+
+        bev_images = {}
+        if bev_debug.get('camera_bev') is not None:
+            bev_images['camera'] = wandb.Image(_bev_to_image(bev_debug['camera_bev']))
+        if bev_debug.get('radar_bev') is not None:
+            bev_images['radar'] = wandb.Image(_bev_to_image(bev_debug['radar_bev']))
+        if bev_debug.get('lidar_bev') is not None:
+            bev_images['lidar'] = wandb.Image(_bev_to_image(bev_debug['lidar_bev']))
+        if bev_debug.get('radar_lidar_bev') is not None:
+            bev_images['radar_lidar'] = wandb.Image(_bev_to_image(bev_debug['radar_lidar_bev']))
+        if bev_debug.get('fused_bev') is not None:
+            bev_images['fused'] = wandb.Image(_bev_to_image(bev_debug['fused_bev']))
+
+        if bev_images:
+            wandb.log({f'train/bev_debug/{k}': v for k, v in bev_images.items()}, commit=False)
 
     if sw is not None and sw.save_this:
         if module.use_radar:

@@ -1573,6 +1573,20 @@ class SegnetTransformerLiftFuse(nn.Module):
         # bev decoder
         seg_e = {}
 
+        bev_debug = {
+            "camera_bev": bev_queries_cam_out.permute(0, 2, 1).reshape(B, self.latent_dim, self.Z_cam, self.X_cam).detach(),
+            "fused_bev": feat_bev.detach(),
+        }
+
+        if self.use_radar:
+            bev_debug["radar_bev"] = rad_bev_.detach()
+        if self.use_lidar:
+            bev_debug["lidar_bev"] = lid_bev_.detach()
+        if self.use_radar or self.use_lidar:
+            bev_debug["radar_lidar_bev"] = radar_lidar_bev_queries.permute(0, 2, 1).reshape(
+                B, self.latent_dim, self.Z_rad, self.X_rad
+            ).detach()
+
         if self.train_task == "object":
             out_dict_objects = self.object_decoder(feat_bev, (self.bev_flip1_index, self.bev_flip2_index)
                                                    if self.rand_flip else None)
@@ -1630,4 +1644,5 @@ class SegnetTransformerLiftFuse(nn.Module):
 
         # return the usual output PLUS a dict of factors
         return seg_e, {"ce_factor": ce_factor, "fc_map_factor": fc_map_factor,
-                       "gate_reg_loss": gate_reg_loss, "fusion_debug": fusion_debug}
+                       "gate_reg_loss": gate_reg_loss, "fusion_debug": fusion_debug,
+                       "bev_debug": bev_debug}

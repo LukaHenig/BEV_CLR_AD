@@ -58,6 +58,9 @@ init_query_with_image_feats: true
 do_rgbcompress: true             # Apply minor convolutional compression on 2D features.
 use_multi_scale_img_feats: true  # Use 4/8/16/32 features as keys for cross-attention (richer, heavier).
 num_layers: 6                    # Number of transformer encoder & fuser blocks (stacked).
+gate_entropy_weight: 0.01       # Weight for the gate entropy regularization term.
+query_gate_mode: 'learned'      # 'learned' (MLP gate), 'fixed' (use query_gate_fixed_weights), or 'off'.
+query_gate_fixed_weights: [0.5, 0.5]  # Radar/LiDAR weights when query_gate_mode='fixed'.
 
 # ======================
 # Misc / model plumbing

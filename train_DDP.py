@@ -709,6 +709,11 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
     one = seg_e.new_tensor(1.0)
     ce_factor = factors.get("ce_factor", one)
     fc_map_factor = factors.get("fc_map_factor", one)
+    gate_reg_loss = factors.get("gate_reg_loss")
+
+    if gate_reg_loss is not None:
+        total_loss = total_loss + gate_reg_loss
+        metrics["gate_reg_loss"] = gate_reg_loss.detach()
 
     # get bev map from masks
     if train_task == 'both' or train_task == 'map':
@@ -1054,6 +1059,9 @@ def main(
         do_shuffle_cams=True,
         use_multi_scale_img_feats=False,
         num_layers=6,
+        gate_entropy_weight=0.01,
+        query_gate_mode='learned',
+        query_gate_fixed_weights=(0.5, 0.5),
         # cuda
         device_ids=None,
         freeze_dino=True,
@@ -1310,6 +1318,9 @@ def main(
                                         combine_feat_init_w_learned_q=combine_feat_init_w_learned_q,
                                         use_rpn_radar=use_rpn_radar, use_radar_occupancy_map=use_radar_occupancy_map,
                                         freeze_dino=freeze_dino, learnable_fuse_query=learnable_fuse_query,
+                                        gate_entropy_weight=gate_entropy_weight,
+                                        query_gate_mode=query_gate_mode,
+                                        query_gate_fixed_weights=query_gate_fixed_weights,
                                         use_lidar=use_lidar,
                                         use_lidar_encoder=use_lidar_encoder,
                                         lidar_encoder_type=lidar_encoder_type,

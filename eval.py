@@ -567,6 +567,11 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
     one = seg_e.new_tensor(1.0)
     ce_factor = factors.get("ce_factor", one)
     fc_map_factor = factors.get("fc_map_factor", one)
+    gate_reg_loss = factors.get("gate_reg_loss")
+
+    if gate_reg_loss is not None:
+        total_loss = total_loss + gate_reg_loss
+        metrics["gate_reg_loss"] = gate_reg_loss.detach()
     
     inference_t = time.time() - start_inference_t
     # print("Inference time: ", inference_t)  # optional: pure inference timing
@@ -767,6 +772,9 @@ def main(
         do_rgbcompress=True,
         use_multi_scale_img_feats=False,
         num_layers=6,
+        gate_entropy_weight=0.01,
+        query_gate_mode='learned',
+        query_gate_fixed_weights=(0.5, 0.5),
         grid_dim=(200, 8, 200),
         # cuda
         device_ids=[0],
@@ -881,6 +889,9 @@ def main(
                                           use_multi_scale_img_feats=use_multi_scale_img_feats,
                                           num_layers=num_layers,
                                           latent_dim=128,
+                                          gate_entropy_weight=gate_entropy_weight,
+                                          query_gate_mode=query_gate_mode,
+                                          query_gate_fixed_weights=query_gate_fixed_weights,
                                           combine_feat_init_w_learned_q=combine_feat_init_w_learned_q,
                                           use_rpn_radar=use_rpn_radar,
                                           use_radar_occupancy_map=use_radar_occupancy_map,

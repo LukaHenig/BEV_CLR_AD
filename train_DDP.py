@@ -1190,6 +1190,12 @@ def main(
         else:
             print("NO Lidar in use")
 
+        print('num_layers:', num_layers)
+        print('gate_mode:', query_gate_mode)
+        if query_gate_mode == 'fixed':
+            print('gate_fixed_weights:', query_gate_fixed_weights)
+    
+
     # wandb extension
     wandb_config = {
         "exp_name": exp_name,

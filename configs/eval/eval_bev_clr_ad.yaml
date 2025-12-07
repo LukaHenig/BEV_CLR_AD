@@ -21,7 +21,7 @@ data_dir: '/../../../../../../beegfs/scratch/workspace/es_luheit04-NuScneDataset
 custom_dataroot: 'datasets/scaled_images'
                                  # Optional pre-scaled images root used when use_pre_scaled_imgs=true.
 log_dir: 'logs_eval'             # TensorBoard/TensorboardX evaluation log root.
-init_dir: 'model_checkpoints/BEV_CLR_AD_1x5_3e-4s_09-02-37'
+init_dir: 'model_checkpoints/BEV_CLR_AD_1x5_3e-4s_10-20-51'
                                  # Directory containing the checkpoint to evaluate.
 ignore_load: null                # Optional list/pattern of keys to ignore when loading the checkpoint.
 load_step: 35000                 # Specific training step checkpoint to load (set to null to load latest).
@@ -40,7 +40,7 @@ grid_dim: [200, 8, 200]          # Voxel grid (Z, Y, X). Y is vertical bins; BEV
 # ======================
 encoder_type: 'dino_v2'          # Image backbone: 'dino_v2' (ViT-B/14 adapter).
 radar_encoder_type: 'voxel_net'  # RADAR BEV encoder: currently 'voxel_net' (sparse voxel feature net).
-lidar_encoder_type: 'voxel_net'  # LiDAR BEV encoder: 'voxel_net' (dense) or 'voxel_next' (sparse spconv backbone).
+lidar_encoder_type: 'voxel_next'  # LiDAR BEV encoder: 'voxel_net' (dense) or 'voxel_next' (sparse spconv backbone).
 use_rpn_radar: false             # Keep RPN disabled as in training.
 train_task: 'both'               # Shared decoder for objects and semantic map tasks.
 use_radar: true                  # Enable RADAR branch during inference.
@@ -57,7 +57,7 @@ init_query_with_image_feats: true
                                  # Initialize BEV queries using lifted multi-view image features.
 do_rgbcompress: true             # Apply minor convolutional compression on 2D features.
 use_multi_scale_img_feats: true  # Use 4/8/16/32 features as keys for cross-attention (richer, heavier).
-num_layers: 7                    # Number of transformer encoder & fuser blocks (stacked).
+num_layers: 6                    # Number of transformer encoder & fuser blocks (stacked).
 
 # ======================
 # Misc / model plumbing
@@ -69,4 +69,3 @@ combine_feat_init_w_learned_q: true
                                  # Sum image-initialized queries with learned BEV queries + positional encodings.
 model_type: 'transformer'        # Transformer-based lifting/fusion model.
 learnable_fuse_query: true       # Include learned fusion query to stabilize radar/lidar fusion.
-

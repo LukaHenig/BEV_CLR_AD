@@ -41,4 +41,3 @@ srun -u python train.py --config=configs/train/train_bev_clr_ad_L40S.yaml
 #See: squeue -u $USER or sacct -j "JOBID" --format=JobID,JobName,State,ExitCode,Elapsed
 #When does it run:  squeue --start -j "JOBID"
 ##########################################################################################
-

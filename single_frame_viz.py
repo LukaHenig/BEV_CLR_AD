@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import itertools
 import os
+from datetime import datetime
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -122,16 +123,32 @@ def _plot_pointcloud(ax, points: np.ndarray, title: str, color_dim: int | None =
         cmap="viridis",
     )
     ax.set_title(title)
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("Z")
+    ax.set_xlabel("X (forward)")
+    ax.set_ylabel("Y (left)")
+    ax.set_zlabel("Z (up)")
     ax.set_box_aspect([1, 1, 0.5])
+    # Look from just above and behind the ego vehicle, so +X is forward.
+    ax.view_init(elev=20, azim=-90)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Render a single nuScenes sample with raw inputs.")
     parser.add_argument("--config", required=True, help="Path to a training YAML config.")
-    parser.add_argument("--output", default="assets/sample_frame.png", help="Where to save the figure.")
+    parser.add_argument(
+        "--output",
+        default="assets/sample_frame.png",
+        help="Where to save the combined figure (kept for backward compatibility).",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="assets/single_frame_runs",
+        help="Directory to store per-run visualizations.",
+    )
+    parser.add_argument(
+        "--run-name",
+        default=None,
+        help="Optional subfolder name; defaults to a timestamp if omitted.",
+    )
     parser.add_argument("--sample-index", type=int, default=0, help="Index of the sample to visualize (within the dataset).")
     args = parser.parse_args()
 
@@ -178,19 +195,45 @@ def main():
     _plot_cameras(fig, imgs)
 
     radar_ax = fig.add_subplot(3, 3, 7, projection="3d")
-    _plot_pointcloud(radar_ax, radar_points, "Radar point cloud", color_dim=3 if radar_points.shape[1] > 3 else None)
+    _plot_pointcloud(radar_ax, radar_points, "Radar point cloud (ego frame)", color_dim=3 if radar_points.shape[1] > 3 else None)
 
     lidar_ax = fig.add_subplot(3, 3, 8, projection="3d")
     if lidar_points is not None:
-        _plot_pointcloud(lidar_ax, lidar_points, "LiDAR point cloud", color_dim=3 if lidar_points.shape[1] > 3 else None)
+        _plot_pointcloud(lidar_ax, lidar_points, "LiDAR point cloud (ego frame)", color_dim=3 if lidar_points.shape[1] > 3 else None)
     else:
         lidar_ax.set_title("LiDAR point cloud (not provided)")
         lidar_ax.axis("off")
 
-    Path(os.path.dirname(args.output) or ".").mkdir(parents=True, exist_ok=True)
+    # Prepare output layout
+    run_name = args.run_name or datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_dir = Path(args.output_dir) / run_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+
     plt.tight_layout()
+
+    # Save combined figure (legacy output path retained)
+    Path(os.path.dirname(args.output) or ".").mkdir(parents=True, exist_ok=True)
     fig.savefig(args.output, dpi=200)
-    print(f"Saved frame visualization to {args.output}")
+
+    # Save separated views inside the run directory
+    fig.savefig(run_dir / "overview.png", dpi=200)
+
+    radar_only = plt.figure(figsize=(6, 6))
+    ax_radar_only = radar_only.add_subplot(1, 1, 1, projection="3d")
+    _plot_pointcloud(ax_radar_only, radar_points, "Radar point cloud (ego frame)", color_dim=3 if radar_points.shape[1] > 3 else None)
+    radar_only.tight_layout()
+    radar_only.savefig(run_dir / "radar_pointcloud.png", dpi=200)
+    plt.close(radar_only)
+
+    if lidar_points is not None:
+        lidar_only = plt.figure(figsize=(6, 6))
+        ax_lidar_only = lidar_only.add_subplot(1, 1, 1, projection="3d")
+        _plot_pointcloud(ax_lidar_only, lidar_points, "LiDAR point cloud (ego frame)", color_dim=3 if lidar_points.shape[1] > 3 else None)
+        lidar_only.tight_layout()
+        lidar_only.savefig(run_dir / "lidar_pointcloud.png", dpi=200)
+        plt.close(lidar_only)
+
+    print(f"Saved frame visualization to {args.output} and {run_dir}")
 
 
 if __name__ == "__main__":

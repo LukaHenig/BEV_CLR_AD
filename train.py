@@ -12,9 +12,12 @@ import numpy as np
 import torch
 import torch.multiprocessing
 import torch.nn.functional as F
+from pathlib import Path
+
 import yaml
 from shapely.errors import ShapelyDeprecationWarning
 from tensorboardX import SummaryWriter
+from PIL import Image
 
 import nuscenes_data
 import saverloader
@@ -467,7 +470,8 @@ def create_train_pool_dict(name: str, n_pool: int) -> tuple[dict, str]:
 def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=None,
               use_radar_encoder=None, radar_encoder_type=None, train_task='both',
               use_shallow_metadata=True, use_obj_layer_only_on_map=True,
-              use_lidar=False, use_lidar_encoder=False, lidar_encoder_type=None):
+              use_lidar=False, use_lidar_encoder=False, lidar_encoder_type=None,
+              bev_debug_dir=None):
     metrics = {}
     total_loss = torch.tensor(0.0, requires_grad=True).to(device)
 
@@ -853,20 +857,36 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
             bev_vis = utils.improc.oned2inferno(bev_slice, norm=True)
             return bev_vis[0].permute(1, 2, 0).detach().cpu().numpy()
 
+        def _persist_bev_arrays(bev_arrays):
+            if bev_debug_dir is None:
+                return
+            step_dir = Path(bev_debug_dir) / f"step_{sw.global_step:06d}"
+            step_dir.mkdir(parents=True, exist_ok=True)
+            for name, arr in bev_arrays.items():
+                img = Image.fromarray((np.clip(arr, 0.0, 1.0) * 255).astype(np.uint8))
+                img.save(step_dir / f"{name}.png")
+
+        bev_arrays = {}
         bev_images = {}
         if bev_debug.get('camera_bev') is not None:
-            bev_images['camera'] = wandb.Image(_bev_to_image(bev_debug['camera_bev']))
+            bev_arrays['camera'] = _bev_to_image(bev_debug['camera_bev'])
+            bev_images['camera'] = wandb.Image(bev_arrays['camera'])
         if bev_debug.get('radar_bev') is not None:
-            bev_images['radar'] = wandb.Image(_bev_to_image(bev_debug['radar_bev']))
+            bev_arrays['radar'] = _bev_to_image(bev_debug['radar_bev'])
+            bev_images['radar'] = wandb.Image(bev_arrays['radar'])
         if bev_debug.get('lidar_bev') is not None:
-            bev_images['lidar'] = wandb.Image(_bev_to_image(bev_debug['lidar_bev']))
+            bev_arrays['lidar'] = _bev_to_image(bev_debug['lidar_bev'])
+            bev_images['lidar'] = wandb.Image(bev_arrays['lidar'])
         if bev_debug.get('radar_lidar_bev') is not None:
-            bev_images['radar_lidar'] = wandb.Image(_bev_to_image(bev_debug['radar_lidar_bev']))
+            bev_arrays['radar_lidar'] = _bev_to_image(bev_debug['radar_lidar_bev'])
+            bev_images['radar_lidar'] = wandb.Image(bev_arrays['radar_lidar'])
         if bev_debug.get('fused_bev') is not None:
-            bev_images['fused'] = wandb.Image(_bev_to_image(bev_debug['fused_bev']))
+            bev_arrays['fused'] = _bev_to_image(bev_debug['fused_bev'])
+            bev_images['fused'] = wandb.Image(bev_arrays['fused'])
 
         if bev_images:
             wandb.log({f'train/bev_debug/{k}': v for k, v in bev_images.items()}, commit=False)
+            _persist_bev_arrays(bev_arrays)
 
     if sw is not None and sw.save_this:
         if module.use_radar:
@@ -1071,6 +1091,7 @@ def main(
         custom_dataroot='../../../nuscenes/scaled_images',
         log_dir='logs_nuscenes_bevcar',
         ckpt_dir='checkpoints/',
+        bev_debug_dir=None,
         keep_latest=75,
         init_dir='',
         ignore_load=None,
@@ -1155,6 +1176,10 @@ def main(
 
     model_name = exp_name + '_' + model_name
     print('model_name', model_name)
+
+    if bev_debug_dir is None:
+        bev_debug_dir = os.path.join(log_dir, model_name, 'bev_debug')
+    Path(bev_debug_dir).mkdir(parents=True, exist_ok=True)
 
     # set up ckpt and logging
     ckpt_dir = os.path.join(ckpt_dir, model_name)
@@ -1454,6 +1479,7 @@ def main(
                 use_lidar=use_lidar,
                 use_lidar_encoder=use_lidar_encoder,
                 lidar_encoder_type=lidar_encoder_type,
+                bev_debug_dir=bev_debug_dir,
             )
 
             (total_loss_ / grad_acc).backward()

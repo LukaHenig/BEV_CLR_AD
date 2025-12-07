@@ -1367,6 +1367,8 @@ class SegnetTransformerLiftFuse(nn.Module):
             feat_bev_q_dim = self.imgs_bev_compressor(feat_bev_)
             img_feat_bev_q_dim = feat_bev_q_dim.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
 
+            rad_bev_q_dim = None
+            lid_bev_q_dim = None
             if self.use_radar:
                 rad_bev_q_dim = rad_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
             if self.use_lidar:
@@ -1407,6 +1409,8 @@ class SegnetTransformerLiftFuse(nn.Module):
                 bev_queries = self.image_based_query_attention(fused_bev_q_dim, img_feat_bev_q_dim)
             elif self.use_radar:
                 bev_queries = self.image_based_query_attention(rad_bev_q_dim, img_feat_bev_q_dim)
+            elif self.use_lidar:
+                bev_queries = self.image_based_query_attention(lid_bev_q_dim, img_feat_bev_q_dim)
             else:
                 bev_queries = img_feat_bev_q_dim
 
@@ -1606,6 +1610,16 @@ class SegnetTransformerLiftFuse(nn.Module):
             fusion_debug["fusion/lidar_query_rms"] = lidar_query_rms.detach()
         if radar_lidar_query_rms is not None:
             fusion_debug["fusion/rad_lidar_query_rms"] = radar_lidar_query_rms.detach()
+        if gate_mean is not None:
+            fusion_debug["fusion/query_gate_mean"] = gate_mean.detach()
+        if gate_std is not None:
+            fusion_debug["fusion/query_gate_std"] = gate_std.detach()
+        if gate_min is not None:
+            fusion_debug["fusion/query_gate_min"] = gate_min.detach()
+        if gate_max is not None:
+            fusion_debug["fusion/query_gate_max"] = gate_max.detach()
+        if gated_query_rms is not None:
+            fusion_debug["fusion/gated_query_rms"] = gated_query_rms.detach()
         if cam_query_rms is not None:
             fusion_debug["fusion/cam_query_rms"] = cam_query_rms.detach()
         if learned_init_rms is not None:

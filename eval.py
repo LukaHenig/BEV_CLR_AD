@@ -797,17 +797,6 @@ def main(
         print(f"{k} =", locals().get(k))
 
 
-    signature = inspect.signature(main)
-    local_vars = locals().copy()
-    config_to_save = {}
-    for name, parameter in signature.parameters.items():
-        if name in local_vars:
-            config_to_save[name] = local_vars[name]
-        elif parameter.default is not inspect._empty:
-            config_to_save[name] = parameter.default
-        else:
-            config_to_save[name] = None
-
     assert (model_type in ['transformer', 'simple_lift_fuse', 'SimpleBEV_map'])
     B = batch_size
     assert (B % len(device_ids) == 0)  # batch size must be divisible by number of gpus
@@ -824,14 +813,8 @@ def main(
     run_log_dir = os.path.join(log_dir, model_name)
     os.makedirs(run_log_dir, exist_ok=True)
 
-    config_to_save['model_name'] = model_name
-    config_to_save['run_log_dir'] = run_log_dir
-    config_save_path = os.path.join(run_log_dir, 'config_used.yaml')
-    with open(config_save_path, 'w') as config_file:
-        yaml.safe_dump(config_to_save, config_file, sort_keys=False)
-
     if config_path is not None and os.path.isfile(config_path):
-        shutil.copy2(config_path, os.path.join(run_log_dir, os.path.basename(config_path)))
+        shutil.copy2(config_path, os.path.join(run_log_dir, 'used_eval_bev_clr.yaml'))
 
     # set up logging
     writer_ev = SummaryWriter(os.path.join(run_log_dir, 'ev'), max_queue=10, flush_secs=60)

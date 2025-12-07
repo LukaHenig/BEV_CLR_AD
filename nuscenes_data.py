@@ -1132,7 +1132,7 @@ class VizData(NuscData):
             lidar_data = lidar_data.T
 
             # Cap / pad number of LiDAR points
-            V_lid = 8000 * self.lidar_nsweeps  # desired max number of points
+            V_lid = 35000 * self.lidar_nsweeps  # desired max number of points
 
             if lidar_data.shape[0] > V_lid:
                 # Truncate extra points

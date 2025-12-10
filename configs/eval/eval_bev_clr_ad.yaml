@@ -40,7 +40,7 @@ grid_dim: [200, 8, 200]          # Voxel grid (Z, Y, X). Y is vertical bins; BEV
 # ======================
 encoder_type: 'dino_v2'          # Image backbone: 'dino_v2' (ViT-B/14 adapter).
 radar_encoder_type: 'voxel_net'  # RADAR BEV encoder: currently 'voxel_net' (sparse voxel feature net).
-lidar_encoder_type: 'voxel_next'  # LiDAR BEV encoder: 'voxel_net' (dense) or 'voxel_next' (sparse spconv backbone).
+lidar_encoder_type: 'voxel_net'  # LiDAR BEV encoder type when use_lidar_encoder=true ('voxel_net', 'voxel_next', or 'pointpillars').
 use_rpn_radar: false             # Keep RPN disabled as in training.
 train_task: 'both'               # Shared decoder for objects and semantic map tasks.
 use_radar: true                  # Enable RADAR branch during inference.

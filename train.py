@@ -569,7 +569,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
         lid_intensity = lid_data[:, :, 3:4]  
 
         # add a branch for voxelnext
-        if lidar_encoder_type == 'voxel_net':
+        if lidar_encoder_type == 'voxel_net' or lidar_encoder_type == 'pointpillars':
             lid_feats = lid_intensity          # 1 channel: intensity
         elif lidar_encoder_type == 'voxel_next':
             # include intensity and timestamp
@@ -634,7 +634,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
 
     lid_occ_mem0 = None
     if use_lidar and lid_xyz_cam0 is not None:
-        if use_lidar_encoder and lidar_encoder_type in ['voxel_net', 'voxel_next']:
+        if use_lidar_encoder and lidar_encoder_type in ['voxel_net', 'voxel_next', 'pointpillars']:
             # use the intensity you already built from lid_data (trimmed to lid_keep!)
             # shapes: lid_xyz_cam0 -> (B, N, 3), lid_intensity -> (B, N, 1)
             assert lid_xyz_cam0.shape[0] == lid_intensity.shape[0] and lid_xyz_cam0.shape[1] == lid_intensity.shape[1], \
@@ -648,6 +648,8 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
 
             # keep batch dimension; the model expects a (features, coords, num_vox) tuple per batch
             lid_occ_mem0 = (lid_vox_feats, lid_vox_coords, lid_num_vox)
+        elif use_lidar_encoder:
+            raise ValueError(f"Unsupported lidar encoder: {lidar_encoder_type}")
         else:
             # occupancy path
             lid_occ_mem0 = vox_util.voxelize_xyz(lid_xyz_cam0, Z, Y, X, assert_cube=False)

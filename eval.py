@@ -493,7 +493,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
     # --- LiDAR -> Voxel / Occupancy vorbereiten + sanity checks ---
     lid_occ_mem0 = None
     if use_lidar and lid_xyz_cam0 is not None:
-        if use_lidar_encoder and lidar_encoder_type in ['voxel_net', 'voxel_next']:
+        if use_lidar_encoder and lidar_encoder_type in ['voxel_net', 'voxel_next', 'pointpillars']:
             # Grundvoraussetzungen: Intensitäten müssen zur XYZ-Form passen
             assert lid_intensity is not None, "LiDAR intensity features required for voxel encoder"
             assert lid_xyz_cam0.shape[:2] == lid_intensity.shape[:2], \
@@ -527,7 +527,8 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
             print(f"[EVAL] LiDAR voxel encoder -> occupied voxels (sum over batch): {total_vox}")
             # hart: wenn 0, dann ist der Pfad praktisch tot (Bounds/Kalibrierung/Units prüfen)
             assert total_vox > 0, "LiDAR produced zero occupied voxels"
-    
+        elif use_lidar_encoder:
+            raise ValueError(f"Unsupported lidar encoder: {lidar_encoder_type}")
         else:
             # Occupancy-Pfad: dichte Belegung erwartet (B,1,Z,Y,X)
             lid_occ_mem0 = vox_util.voxelize_xyz(lid_xyz_cam0, Z, Y, X, assert_cube=False)

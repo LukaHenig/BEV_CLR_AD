@@ -21,6 +21,8 @@ from nets.ops.modules import MSDeformAttn, MSDeformAttn3D
 from nets.voxelnet import VoxelNet
 from nets.voxelNeXt import VoxelResBackBone8xVoxelNeXt
 from nets.voxelNeXt_decoder import VoxelNeXtDecoder
+from nets.pointpillars import PointPillarsEncoder
+
 
 torch.autograd.set_detect_anomaly(False) # just for debugging purposes
 
@@ -705,7 +707,7 @@ class SegnetTransformerLiftFuse(nn.Module):
         super(SegnetTransformerLiftFuse, self).__init__()
         assert (encoder_type in ["res101", "res50", "dino_v2", "vit_s"])
         assert (radar_encoder_type in ["voxel_net", None])
-        assert (lidar_encoder_type in ["voxel_net", "voxel_next", None])
+        assert (lidar_encoder_type in ["voxel_net", "voxel_next", "pointpillars", None])
         assert (train_task in ["object", "map", "both"])
 
         self.Z_cam, self.Y_cam, self.X_cam = Z_cam, Y_cam, X_cam  # Z=200, Y=8, X=200
@@ -858,6 +860,15 @@ class SegnetTransformerLiftFuse(nn.Module):
                     model_cfg=voxelnext_cfg,
                     input_channels=5,    # x,y,z,intensity,timestamp
                     grid_size=grid_size,
+                )
+            elif self.lidar_encoder_type == "pointpillars":
+                self.lidar_encoder = PointPillarsEncoder(
+                    latent_dim = latent_dim,
+                    Z = self.Z_rad,
+                    Y = self.Y_rad,
+                    X = self.X_rad,
+                    point_feature_dim =4,
+                    with_distance = False,
                 )
                 
             else:
@@ -1247,6 +1258,7 @@ class SegnetTransformerLiftFuse(nn.Module):
                         voxel_coords=lidar_occ_mem0[1],
                         num_voxels=lidar_occ_mem0[2],
                     )
+            
                     if voxel_features is None or voxel_coords is None:
                         # Keine gültigen Voxel → leeres BEV
                         lid_bev_ = torch.zeros((B, self.latent_dim, self.Z_rad, self.X_rad), device=device)
@@ -1281,6 +1293,15 @@ class SegnetTransformerLiftFuse(nn.Module):
 
                         # Grobes BEV → dichtes BEV (B, latent_dim, Z_rad, X_rad)
                         lid_bev_ = self.voxelnext_decoder(coarse)
+                
+                elif self.lidar_encoder_type == 'pointpillars':
+                    lid_bev_ = self.lidar_encoder(
+                        voxel_features=lidar_occ_mem0[0],
+                        voxel_coords=lidar_occ_mem0[1],
+                        num_points_per_voxel=lidar_occ_mem0[2],
+                        vox_util=vox_util,
+                        dinovoxel=dinovoxel,
+                    )
                 else:
                     if self.is_master:
                         print('LiDAR encoder type not supported')
@@ -1564,7 +1585,7 @@ class SegnetTransformerLiftFuse(nn.Module):
             if rad_occ_mem0 is not None and not (self.radar_encoder_type == "voxel_net"):
                 rad_occ_mem0[self.bev_flip1_index] = torch.flip(rad_occ_mem0[self.bev_flip1_index], [-1])
                 rad_occ_mem0[self.bev_flip2_index] = torch.flip(rad_occ_mem0[self.bev_flip2_index], [-3])
-            if lidar_occ_mem0 is not None and not (self.lidar_encoder_type in ["voxel_net", "voxel_next"]):
+            if lidar_occ_mem0 is not None and not (self.lidar_encoder_type in ["voxel_net", "voxel_next", "pointpillars"]):
                 lidar_occ_mem0[self.bev_flip1_index] = torch.flip(lidar_occ_mem0[self.bev_flip1_index], [-1])
                 lidar_occ_mem0[self.bev_flip2_index] = torch.flip(lidar_occ_mem0[self.bev_flip2_index], [-3])
 

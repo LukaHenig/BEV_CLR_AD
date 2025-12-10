@@ -659,7 +659,7 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
     # --- LiDAR (VoxelNet path, mirrors train.py) ---
     lid_occ_mem0 = None
     if use_lidar and lid_xyz_cam0 is not None:
-        if use_lidar_encoder and lidar_encoder_type in ['voxel_net', 'voxel_next']:
+        if use_lidar_encoder and lidar_encoder_type in ['voxel_net', 'voxel_next', 'pointpillars']:
             # We already built lid_intensity above as lid_data[:, :, 3:4]
             assert lid_xyz_cam0.shape[0] == lid_intensity.shape[0] and \
                    lid_xyz_cam0.shape[1] == lid_intensity.shape[1], \
@@ -675,6 +675,8 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
 
             # The model expects a (features, coords, num_vox) tuple
             lid_occ_mem0 = (lid_vox_feats, lid_vox_coords, lid_num_vox)
+        elif use_lidar_encoder:
+            raise ValueError(f"Unsupported lidar encoder: {lidar_encoder_type}")
         else:
             # Lightweight fallback: plain occupancy (not used in Option A, but keep for completeness)
             lid_occ_mem0 = vox_util.voxelize_xyz(lid_xyz_cam0, Z, Y, X, assert_cube=False)

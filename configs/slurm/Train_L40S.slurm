@@ -33,7 +33,10 @@ nvidia-smi || true
 export CUDA_VISIBLE_DEVICES=0
 export WANDB__SERVICE_WAIT=300
 
-srun -u python train.py --config=configs/train/train_bev_clr_ad_L40S.yaml
+srun -u     python scripts/nuscenes_lidar_histogram.py \
+        --dataroot /../../../../../../beegfs/scratch/workspace/es_luheit04-NuScneDataset_new/es_luheit04-NuSceneDataset-1756172124/nuscenes \
+        --version v1.0-trainval \
+        --output lidar_hist.png
 
 #########################################################################################
 #Start: sbatch BEV_CLR_AD/configs/slurm/Train_L40S.slurm

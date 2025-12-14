@@ -4,8 +4,8 @@ This script iterates over every LIDAR_TOP ``sample_data`` record in a nuScenes
 installation, counts the number of lidar points, and plots the distribution.
 
 Example:
-    python nuscenes_lidar_histogram.py \
-        --dataroot /datasets/nuscenes \
+    python scripts/nuscenes_lidar_histogram.py \
+        --dataroot /../../../../../../beegfs/scratch/workspace/es_luheit04-NuScneDataset_new/es_luheit04-NuSceneDataset-1756172124/nuscenes \
         --version v1.0-trainval \
         --output lidar_hist.png
 """

@@ -76,11 +76,11 @@ def load(ckpt_dir,
                 # 2. overwrite entries in the existing state dict
                 model_dict.update(pretrained_dict)
                 # 3. load the new state dict
-                model.load_state_dict(model_dict, strict=False)
+                model.load_state_dict(model_dict, strict=True)
 
             else:
                 checkpoint = torch.load(path, map_location=device)
-                model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+                model.load_state_dict(checkpoint['model_state_dict'], strict=True)
 
             if optimizer is not None:
                 optimizer.load_state_dict(checkpoint['optimizer_state_dict'])

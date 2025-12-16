@@ -280,6 +280,8 @@ def collect_metrics_for_wandb(total_loss: torch.Tensor, metrics: dict, mode: str
                 # weights
                 'pooled/ce_weight': pool_dict['ce_weight_pool_' + pool_name].mean(),
                 'stats/ce_weight': metrics['ce_weight'],
+                'stats/ce_factor': metrics.get('ce_factor', None),
+                'stats/fc_map_factor': metrics.get('fc_map_factor', None),
             })
             # log object metrics
             wandb.log({'DDP_train_metrics_object': ddp_train_metrics_object}, commit=commit)
@@ -711,6 +713,9 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
     one = seg_e.new_tensor(1.0)
     ce_factor = factors.get("ce_factor", one)
     fc_map_factor = factors.get("fc_map_factor", one)
+    # sanity-check: log the learned loss scaling factors
+    metrics["ce_factor"] = ce_factor.detach()
+    metrics["fc_map_factor"] = fc_map_factor.detach()
     gate_reg_loss = factors.get("gate_reg_loss")
 
     if gate_reg_loss is not None:
@@ -748,11 +753,14 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
         ego_other_cars_on_map_e = ego_car_on_map_e * (1 - obj_seg_bev) + other_cars_plane_e * obj_seg_bev
 
         # loss calculation
-        map_seg_fc_loss = map_seg_loss_fn(bev_map_mask_e, bev_map_only_mask_g)
-        #   map
-        map_seg_fc_loss = 20.0 * map_seg_fc_loss * fc_map_factor
-        # add to total loss
-        total_loss += map_seg_fc_loss
+        # loss calculation (map) - uncertainty-style weighting
+        map_seg_fc_loss_raw = map_seg_loss_fn(bev_map_mask_e, bev_map_only_mask_g)
+        map_seg_fc_loss = 20.0 * (map_seg_fc_loss_raw * fc_map_factor)
+
+        # stabilizer term so fc_map_weight can't drift to +inf
+        total_loss = total_loss + map_seg_fc_loss + module.fc_map_weight
+
+
 
         # MAP IoU calculation
         # ious for map segmentation:
@@ -797,10 +805,15 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
             ego_other_cars_on_map_e = ego_car_on_map_g * (1 - obj_seg_bev_e_sigmoid) + \
                 other_cars_plane * obj_seg_bev_e_sigmoid
         # clc loss
-        ce_loss = loss_fn(obj_seg_bev_e, seg_bev_g, valid_bev_g)
-        # obj
-        ce_loss = 10.0 * ce_loss * ce_factor
-        total_loss += ce_loss
+        # clc loss (object) - uncertainty-style weighting
+        ce_loss_raw = loss_fn(obj_seg_bev_e, seg_bev_g, valid_bev_g)
+        ce_loss = 10.0 * (ce_loss_raw * ce_factor)
+
+        # stabilizer term so ce_weight can't drift to +inf
+        total_loss = total_loss + ce_loss + module.ce_weight
+
+
+
 
         # object IoUs
         obj_seg_bev_e_round = torch.sigmoid(obj_seg_bev_e).round()

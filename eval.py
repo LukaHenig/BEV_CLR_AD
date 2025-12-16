@@ -607,13 +607,18 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
         # combine ego car other cars and map  # not used here  -->  checkout vis_eval_nuscenes for combined results
         # ego_other_cars_on_map_e = ego_car_on_map_e * (1 - obj_seg_bev) + other_cars_plane_e * obj_seg_bev
 
-        # loss calculation
-        map_seg_fc_loss = map_seg_loss_fn(bev_map_mask_e, bev_map_only_mask_g)
-        #   map
-        fc_map_factor = 1 / torch.exp(model.module.fc_map_weight)
-        map_seg_fc_loss = 20.0 * map_seg_fc_loss * fc_map_factor  # 20.0
-        # add to total loss
-        total_loss += map_seg_fc_loss
+        # loss calculation (map) - uncertainty-style weighting
+        module = model.module if hasattr(model, "module") else model
+
+        map_seg_fc_loss_raw = map_seg_loss_fn(bev_map_mask_e, bev_map_only_mask_g)
+
+        # use factor from forward() if present, otherwise fall back to exp(-weight)
+        # (your code already has fc_map_factor earlier, but you overwrite it here)
+        fc_map_factor = fc_map_factor if 'fc_map_factor' in locals() else torch.exp(-module.fc_map_weight)
+
+        map_seg_fc_loss = 20.0 * (map_seg_fc_loss_raw * fc_map_factor)
+        total_loss = total_loss + map_seg_fc_loss + module.fc_map_weight
+
 
         # MAP IoU calculation
 
@@ -661,12 +666,17 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
             obj_seg_bev_e_sigmoid = torch.sigmoid(obj_seg_bev_e)
             ego_other_cars_on_map_e = ego_car_on_map_g * (1 - obj_seg_bev_e_sigmoid) + \
                 other_cars_plane * obj_seg_bev_e_sigmoid
-        # clc loss
-        ce_loss = loss_fn(obj_seg_bev_e, seg_bev_g, valid_bev_g)
-        # obj
-        ce_factor = 1 / torch.exp(model.module.ce_weight)
-        ce_loss = 10.0 * ce_loss * ce_factor  # 10.0
-        total_loss += ce_loss
+        # clc loss (object) - uncertainty-style weighting
+        module = model.module if hasattr(model, "module") else model
+
+        ce_loss_raw = loss_fn(obj_seg_bev_e, seg_bev_g, valid_bev_g)
+
+        # use factor from forward() if present, otherwise fall back to exp(-weight)
+        ce_factor = ce_factor if 'ce_factor' in locals() else torch.exp(-module.ce_weight)
+
+        ce_loss = 10.0 * (ce_loss_raw * ce_factor)
+        total_loss = total_loss + ce_loss + module.ce_weight
+
 
         # object IoUs
         obj_seg_bev_e_round = torch.sigmoid(obj_seg_bev_e).round()  # --> thresh = 0.5

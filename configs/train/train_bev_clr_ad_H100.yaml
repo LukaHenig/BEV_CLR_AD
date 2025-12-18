@@ -2,9 +2,9 @@
 # Model / experiment name
 # ======================
 exp_name: 'BEV_CLR_AD'           # Used to build run names, checkpoint/log folders, and the W&B project name.
-run_name: "H100_Run08"           # fixer Ordnername für ckpt/logs und eindeutig pro run 
+run_name: "H100_Run10"           # fixer Ordnername für ckpt/logs und eindeutig pro run 
 wandb_project: "BEV_CLR_AD"      # W&B Projekt (stabil)
-wandb_run_id: "H100_Run08"       # fixer Run-ID (pro Experiment eindeutig)
+wandb_run_id: "H100_Run10"       # fixer Run-ID (pro Experiment eindeutig)
 
 # ======================
 # Training parameters
@@ -31,7 +31,7 @@ custom_dataroot: 'datasets/scaled_images'
 log_dir: 'logs_nuscenes'         # TensorBoard log root (a subfolder per run is created automatically).
 ckpt_dir: 'model_checkpoints'    # Where checkpoints are saved (a subfolder per run is created).
 keep_latest: 75                  # Keep only the latest N checkpoints (older ones are pruned).
-init_dir: 'model_checkpoints/H100_Run08'                     # Path to a checkpoint to resume from (folder containing ckpt + meta).
+init_dir: 'model_checkpoints/H100_Run10'                     # Path to a checkpoint to resume from (folder containing ckpt + meta).
 ignore_load: null                # Optional list/pattern of keys to ignore when loading a checkpoint state_dict.
 load_step: true                  # When resuming, load global_step from the checkpoint (controls naming/logging).
 load_optimizer: true             # When resuming, also load optimizer state.

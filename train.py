@@ -1439,7 +1439,10 @@ def main(
     # training loop
     while global_step < max_iters:
         global_step += 1
-
+        # --- tell model the current optimizer step (for warmup / freeze-unfreeze) ---
+        module = model.module if hasattr(model, "module") else model
+        if hasattr(module, "set_step"):
+            module.set_step(global_step)
         iter_start_time = time.time()
         iter_read_time = 0.0
 

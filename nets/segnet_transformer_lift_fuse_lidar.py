@@ -703,6 +703,7 @@ class SegnetTransformerLiftFuse(nn.Module):
                  gate_entropy_weight: float = 0.01,
                  query_gate_mode: str = "learned",
                  query_gate_fixed_weights: tuple[float, float] | list[float] | None = None,
+                 warmup_steps: int = 2000,
                  is_master: bool = False):
         super(SegnetTransformerLiftFuse, self).__init__()
         assert (encoder_type in ["res101", "res50", "dino_v2", "vit_s"])
@@ -747,26 +748,62 @@ class SegnetTransformerLiftFuse(nn.Module):
             raise ValueError(f"Unsupported query_gate_mode: {self.query_gate_mode}")
         if query_gate_fixed_weights is None:
             query_gate_fixed_weights = (0.5, 0.5)
+
         self.query_gate_fixed_weights = (float(query_gate_fixed_weights[0]), float(query_gate_fixed_weights[1]))
-        self.query_gate_mlp = None
         self.gate_entropy_weight = gate_entropy_weight
+
+        # Warmup steps for gate training
+        self.warmup_steps = int(warmup_steps)
+        self._cur_step = 0
+
+        # old gating modules, just to keep it 
+        self.query_gate_mlp = None
         self.rad_gate_norm = None
         self.lid_gate_norm = None
+
+        # New lifting + gating modules for radar and lidar features + Gate(Base) + Delta
+        self.lift_gate_norm_rad = None
+        self.lift_gate_norm_lid = None
+        self.lift_delta_norm_rad = None
+        self.lift_delta_norm_lid = None
+        self.lift_gate_mlp = None   # -> (B,N,1)
+        self.lift_delta_mlp = None  # -> (B,N,C)
+
         # --- Channel adapters (1x1 conv tails) ---
         # Auto-adaptive: creates 1x1 only if needed, otherwise Identity (no params)
         self.rad_ch_proj = AdaptiveProj(latent_dim) if self.use_radar else nn.Identity()
         self.lid_ch_proj = AdaptiveProj(latent_dim) if self.use_lidar else nn.Identity()
 
         if self.use_radar and self.use_lidar and self.init_query_with_image_feats:
-            self.rad_gate_norm = nn.LayerNorm(latent_dim)
-            self.lid_gate_norm = nn.LayerNorm(latent_dim)
+            # Gate (Base) works on the *lifted* BEVs, not on raw queries
+            self.lift_gate_norm_rad = nn.LayerNorm(latent_dim)
+            self.lift_gate_norm_lid = nn.LayerNorm(latent_dim)
+
+            # Delta (Residual) also lifted BEVs
+            self.lift_delta_norm_rad = nn.LayerNorm(latent_dim)
+            self.lift_delta_norm_lid = nn.LayerNorm(latent_dim)
+
             if self.query_gate_mode == "learned":
-                self.query_gate_mlp = nn.Sequential(
+                # local gate per BEV cell: (B,N,1)
+                self.lift_gate_mlp = nn.Sequential(
                     nn.Linear(latent_dim * 2, latent_dim),
                     nn.GELU(),
-                    nn.Linear(latent_dim, latent_dim),
+                    nn.Linear(latent_dim, 1),
                     nn.Sigmoid(),
                 )
+                # Gate starts ~0.5 (Sigmoid(0)=0.5) -> stable start
+                nn.init.zeros_(self.lift_gate_mlp[-2].weight)
+                nn.init.zeros_(self.lift_gate_mlp[-2].bias)
+
+            # Delta starts at 0 -> Base dominates at the beginning
+            self.lift_delta_mlp = nn.Sequential(
+                nn.Linear(latent_dim * 2, latent_dim),
+                nn.GELU(),
+                nn.Linear(latent_dim, latent_dim),
+            )
+            nn.init.zeros_(self.lift_delta_mlp[-1].weight)
+            nn.init.zeros_(self.lift_delta_mlp[-1].bias)
+
 
         if self.is_master:
             print("latent_dim: ", latent_dim)
@@ -893,7 +930,15 @@ class SegnetTransformerLiftFuse(nn.Module):
             )
 
             if self.use_radar or self.use_lidar:
-                self.image_based_query_attention = FusingCrossAttentionV2(dim=latent_dim, Z=self.Z_cam, X=self.X_cam)
+                if self.use_radar:
+                    self.image_lift_from_rad = FusingCrossAttentionV2(dim=latent_dim, Z=self.Z_cam, X=self.X_cam)
+                else:
+                    self.image_lift_from_rad = None
+
+                if self.use_lidar:
+                    self.image_lift_from_lid = FusingCrossAttentionV2(dim=latent_dim, Z=self.Z_cam, X=self.X_cam)
+                else:
+                    self.image_lift_from_lid = None
 
         # init queries
         self.bev_queries = nn.Parameter(0.1 * torch.randn(latent_dim, Z_cam, X_cam).float(), requires_grad=True)
@@ -1011,6 +1056,27 @@ class SegnetTransformerLiftFuse(nn.Module):
                                              assert_cube=False)  # transforms mem coordinates into ref coordinates
         else:
             self.xyz_camA = None
+    
+    def set_step(self, step: int) -> None:
+        """Controls warm up behavior based on training step."""
+        self._cur_step = int(step)
+
+        # only relevant if we really have both sensors + image-based init   
+        if not (self.use_radar and self.use_lidar and self.init_query_with_image_feats):
+            return
+
+        in_warmup = self.training and (self._cur_step < self.warmup_steps)
+
+        # durring warmup: freeze Gate+Delta
+        def _freeze(module: nn.Module | None, freeze: bool):
+            if module is None:
+                return
+            for p in module.parameters():
+                p.requires_grad = (not freeze)
+
+        _freeze(self.lift_gate_mlp, in_warmup)
+        _freeze(self.lift_delta_mlp, in_warmup)
+
 
     def _voxelnet_tuple_to_spconv_inputs(
         self,
@@ -1390,53 +1456,79 @@ class SegnetTransformerLiftFuse(nn.Module):
 
             rad_bev_q_dim = None
             lid_bev_q_dim = None
+
             if self.use_radar:
                 rad_bev_q_dim = rad_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
             if self.use_lidar:
                 lid_bev_q_dim = lid_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
 
-            if self.use_radar and self.use_lidar and self.rad_gate_norm is not None and self.lid_gate_norm is not None:
-                rad_gate_inp = self.rad_gate_norm(rad_bev_q_dim)
-                lid_gate_inp = self.lid_gate_norm(lid_bev_q_dim)
+            # 2× Lifting (rad/lid) -> Gate(Base) + Delta(Residual)
+            if self.use_radar and self.use_lidar:
+                assert self.image_lift_from_rad is not None and self.image_lift_from_lid is not None
 
-                if self.query_gate_mode == "learned" and self.query_gate_mlp is not None:
-                    gate_inp = torch.cat([rad_gate_inp, lid_gate_inp], dim=-1)
-                    gate = self.query_gate_mlp(gate_inp)
-                    gate_entropy = gate * torch.log(gate + 1e-6) + (1 - gate) * torch.log(1 - gate + 1e-6)
-                    gate_reg_loss = -gate_entropy.mean() * self.gate_entropy_weight
-                    with torch.no_grad():
-                        gate_mean = gate.mean(dim=(1, 2))
-                        gate_std = gate.std(dim=(1, 2))
-                        gate_min = gate.amin(dim=(1, 2))
-                        gate_max = gate.amax(dim=(1, 2))
-                    fused_bev_q_dim = gate * rad_bev_q_dim + (1 - gate) * lid_bev_q_dim
-                elif self.query_gate_mode == "fixed":
-                    rad_w, lid_w = self.query_gate_fixed_weights
-                    weight_sum = rad_w + lid_w
-                    if weight_sum <= 0:
-                        weight_sum = 1.0
-                    rad_w = rad_w / weight_sum
-                    gate = rad_gate_inp.new_full(rad_gate_inp.shape, rad_w)
-                    with torch.no_grad():
-                        gate_mean = gate.mean(dim=(1, 2))
-                        gate_std = gate.std(dim=(1, 2))
-                        gate_min = gate.amin(dim=(1, 2))
-                        gate_max = gate.amax(dim=(1, 2))
-                    fused_bev_q_dim = gate * rad_gate_inp + (1 - gate) * lid_gate_inp
+                bev_lift_rad = self.image_lift_from_rad(rad_bev_q_dim, img_feat_bev_q_dim)  # (B,N,C)
+                bev_lift_lid = self.image_lift_from_lid(lid_bev_q_dim, img_feat_bev_q_dim)  # (B,N,C)
+
+                # Warmup: 50/50, Gate+Delta frozen via set_step()
+                if self.training and (self._cur_step < self.warmup_steps):
+                    bev_queries = 0.5 * (bev_lift_rad + bev_lift_lid)
+                    gate_reg_loss = rgb_camXs.new_zeros(())
                 else:
-                    fused_bev_q_dim = rad_bev_q_dim if self.use_radar else lid_bev_q_dim
+                    # Gate/Base
+                    if self.query_gate_mode == "learned" and (self.lift_gate_mlp is not None):
+                        gate_inp = torch.cat([
+                            self.lift_gate_norm_rad(bev_lift_rad),
+                            self.lift_gate_norm_lid(bev_lift_lid),
+                        ], dim=-1)  # (B,N,2C)
+                        gate = self.lift_gate_mlp(gate_inp)  # (B,N,1)
 
-                gated_query_rms = _tensor_rms(fused_bev_q_dim)
-                bev_queries = self.image_based_query_attention(fused_bev_q_dim, img_feat_bev_q_dim)
+                        gate_entropy = gate * torch.log(gate + 1e-6) + (1 - gate) * torch.log(1 - gate + 1e-6)
+                        gate_reg_loss = -gate_entropy.mean() * self.gate_entropy_weight
+
+                        with torch.no_grad():
+                            gate_mean = gate.mean(dim=(1, 2))
+                            gate_std = gate.std(dim=(1, 2))
+                            gate_min = gate.amin(dim=(1, 2))
+                            gate_max = gate.amax(dim=(1, 2))
+
+                    elif self.query_gate_mode == "fixed":
+                        rad_w, lid_w = self.query_gate_fixed_weights
+                        wsum = rad_w + lid_w
+                        if wsum <= 0:
+                            wsum = 1.0
+                        rad_w = rad_w / wsum
+                        gate = bev_lift_rad.new_full((B, bev_lift_rad.shape[1], 1), rad_w)
+                        gate_reg_loss = rgb_camXs.new_zeros(())
+                    else:
+                        gate = bev_lift_rad.new_full((B, bev_lift_rad.shape[1], 1), 0.5)
+                        gate_reg_loss = rgb_camXs.new_zeros(())
+
+                    base = gate * bev_lift_rad + (1.0 - gate) * bev_lift_lid
+
+                    # Delta/Residual
+                    delta_inp = torch.cat([
+                        self.lift_delta_norm_rad(bev_lift_rad),
+                        self.lift_delta_norm_lid(bev_lift_lid),
+                    ], dim=-1)  # (B,N,2C)
+                    delta = self.lift_delta_mlp(delta_inp) if (self.lift_delta_mlp is not None) else 0.0
+
+                    bev_queries = base + delta
+
+                gated_query_rms = _tensor_rms(bev_queries)
+
             elif self.use_radar:
-                bev_queries = self.image_based_query_attention(rad_bev_q_dim, img_feat_bev_q_dim)
+                assert self.image_lift_from_rad is not None
+                bev_queries = self.image_lift_from_rad(rad_bev_q_dim, img_feat_bev_q_dim)
+
             elif self.use_lidar:
-                bev_queries = self.image_based_query_attention(lid_bev_q_dim, img_feat_bev_q_dim)
+                assert self.image_lift_from_lid is not None
+                bev_queries = self.image_lift_from_lid(lid_bev_q_dim, img_feat_bev_q_dim)
+
             else:
                 bev_queries = img_feat_bev_q_dim
 
+
         elif self.use_radar_only_init:
-            # new: use radar features as bev query
             bev_queries = rad_bev_.permute(0, 2, 3, 1).reshape(B, -1, self.latent_dim)
         else:
             bev_queries = self.bev_queries.clone().unsqueeze(0).repeat(B, 1, 1, 1).\

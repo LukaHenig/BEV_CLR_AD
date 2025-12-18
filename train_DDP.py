@@ -1174,13 +1174,8 @@ def main(
     ckpt_dir = os.path.join(ckpt_dir, model_name)
 
     dist.barrier()
-    if rank == 0:
-        try:
-            writer_t = SummaryWriter(os.path.join(log_dir, model_name, 't'), max_queue=10, flush_secs=60)
-        except FileExistsError:
-            pass
-    else:
-        writer_t = None
+    writer_t = SummaryWriter(os.path.join(log_dir, model_name, 't'), max_queue=10, flush_secs=60) if rank == 0 else None
+
 
     dist.barrier()
 
@@ -1436,6 +1431,10 @@ def main(
     while global_step < max_iters:
         global_step += 1
 
+        module = model.module if hasattr(model, "module") else model
+        if hasattr(module, "set_step"):
+            module.set_step(global_step)
+
         iter_start_time = time.time()
         iter_read_time = 0.0
 
@@ -1443,60 +1442,73 @@ def main(
         metrics_mean_grad_acc = {}
         total_loss = 0.0
 
-        for internal_step in range(grad_acc):
-            # read sample
-            read_start_time = time.time()
+        import contextlib
 
-            if is_master and internal_step == grad_acc - 1:
+        metrics = {}
+        metrics_mean_grad_acc = {}
+        total_loss = 0.0
+        
+        sw_t = None  # wird nur im letzten grad_acc step gesetzt (rank0), sonst None
+        
+        for internal_step in range(grad_acc):
+            # ---- sample lesen ----
+            read_start_time = time.time()
+        
+            # Summ_writer nur im letzten grad_acc step UND nur auf rank0 (weil nur rank0 writer_t hat)
+            if (internal_step == grad_acc - 1) and (rank == 0) and (writer_t is not None):
                 sw_t = utils.improc.Summ_writer(
                     writer=writer_t,
                     global_step=global_step,
                     log_freq=log_freq,
                     fps=2,
                     scalar_freq=int(log_freq / 2),
-                    just_gif=True)
+                    just_gif=True
+                )
             else:
                 sw_t = None
-
+        
             try:
                 sample = next(train_iterloader)
             except StopIteration:
                 train_iterloader = iter(train_dataloader)
                 sample = next(train_iterloader)
-
-            read_time = time.time() - read_start_time
-            iter_read_time += read_time
-
-            # run training iteration
-            total_loss_, metrics_ = run_model(
-                model, seg_loss_fn, map_seg_loss_fn, sample, Z, Y, X, device, sw_t,
-                use_radar_encoder, radar_encoder_type, train_task,
-                is_master=is_master,
-                use_shallow_metadata=use_shallow_metadata,
-                use_obj_layer_only_on_map=use_obj_layer_only_on_map,
-                use_lidar=use_lidar,
-                use_lidar_encoder=use_lidar_encoder,
-                lidar_encoder_type=lidar_encoder_type,
-                use_lidar_occupancy_map=use_lidar_occupancy_map,
-)
-
-            (total_loss_ / grad_acc).backward()
-
-            # collect total loss and metrics over grad_acc steps
+        
+            iter_read_time += (time.time() - read_start_time)
+        
+            # ---- DDP: Grad-Sync nur im letzten Acc-Step ----
+            ctx = model.no_sync() if internal_step < grad_acc - 1 else contextlib.nullcontext()
+            with ctx:
+                total_loss_, metrics_ = run_model(
+                    model, seg_loss_fn, map_seg_loss_fn, sample, Z, Y, X, device, sw_t,
+                    use_radar_encoder, radar_encoder_type, train_task,
+                    is_master=is_master,
+                    use_shallow_metadata=use_shallow_metadata,
+                    use_obj_layer_only_on_map=use_obj_layer_only_on_map,
+                    use_lidar=use_lidar,
+                    use_lidar_encoder=use_lidar_encoder,
+                    lidar_encoder_type=lidar_encoder_type,
+                    use_lidar_occupancy_map=use_lidar_occupancy_map,
+                )
+                (total_loss_ / grad_acc).backward()
+        
+            # ---- loss/metrics über grad_acc akkumulieren ----
             if internal_step == 0:
                 metrics_mean_grad_acc = metrics_
                 total_loss = total_loss_
             else:
-                # accumulates metrics and if end of grad_acc -> divides by grad_acc --> except intersections / unions
-                metrics = grad_acc_metrics(metrics_single_pass=metrics_, metrics_mean_grad_acc=metrics_mean_grad_acc,
-                                           internal_step=internal_step,
-                                           grad_acc=grad_acc)
+                metrics_mean_grad_acc = grad_acc_metrics(
+                    metrics_single_pass=metrics_,
+                    metrics_mean_grad_acc=metrics_mean_grad_acc,
+                    internal_step=internal_step,
+                    grad_acc=grad_acc
+                )
                 total_loss += total_loss_
-
+        
             if internal_step == grad_acc - 1:
                 total_loss = total_loss / grad_acc
+        
+        metrics = metrics_mean_grad_acc
 
-        torch.nn.utils.clip_grad_norm_(parameters, 5.0)
 
         optimizer.step()
         if use_scheduler:
@@ -1523,8 +1535,9 @@ def main(
 
         # log lr and time
         current_lr = optimizer.param_groups[0]['lr']
-        if rank == 0:
+        if rank == 0 and sw_t is not None:
             sw_t.summ_scalar('_/current_lr', current_lr)
+
 
         iter_time = time.time() - iter_start_time
         train_pool_dict['time_pool_' + train_pool_dict_name].update([iter_time])

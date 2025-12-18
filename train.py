@@ -1129,22 +1129,28 @@ def main(
     else:
         print("CUDA is --- NOT --- available")
 
-    # autogen a name
-    model_name = "%d" % B
-    if grad_acc > 1:
-        model_name += "x%d" % grad_acc
-    lrn = "%.1e" % lr  # e.g., 5.0e-04
-    lrn = lrn[0] + lrn[3:5] + lrn[-1]  # e.g., 5e-4
-    model_name += "_%s" % lrn
-    if use_scheduler:
-        model_name += "s"
+    fixed = os.environ.get("RUN_NAME", "").strip()  
 
-    import datetime
-    model_date = datetime.datetime.now().strftime('%H-%M-%S')
-    model_name = model_name + '_' + model_date
+    if fixed:
+        model_name = fixed
+        print('Using fixed model_name from env RUN_NAME: %s' % model_name)
+    else:
+        # autogen a name
+        model_name = "%d" % B
+        if grad_acc > 1:
+            model_name += "x%d" % grad_acc
+        lrn = "%.1e" % lr  # e.g., 5.0e-04
+        lrn = lrn[0] + lrn[3:5] + lrn[-1]  # e.g., 5e-4
+        model_name += "_%s" % lrn
+        if use_scheduler:
+            model_name += "s"
 
-    model_name = exp_name + '_' + model_name
-    print('model_name', model_name)
+        import datetime
+        model_date = datetime.datetime.now().strftime('%H-%M-%S')
+        model_name = model_name + '_' + model_date
+
+        model_name = exp_name + '_' + model_name
+        print('model_name', model_name)
 
     # set up ckpt and logging
     ckpt_dir = os.path.join(ckpt_dir, model_name)
@@ -1240,7 +1246,20 @@ def main(
         "combine_feat_init_w_learned_q": combine_feat_init_w_learned_q
     }
 
-    wandb.init(project=model_name, entity="esslingen-university", config=wandb_config, group=group, notes=notes,  name=name)
+    #wandb.init(project=model_name, entity="esslingen-university", config=wandb_config, group=group, notes=notes,  name=name)
+    wandb_project = os.environ.get("WANDB_PROJECT", "BEV_CLR_AD").strip()
+    wandb_run_id = os.environ.get("WANDB_RUN_ID", "").strip()  # muss über Jobs konstant sein!
+
+    wandb.init(
+        project=wandb_project + '_' + fixed,
+        entity="esslingen-university",
+        config=wandb_config,
+        group=group,
+        notes=notes,
+        name=model_name,                 
+        id=wandb_run_id if wandb_run_id else None,
+        resume="allow" if wandb_run_id else None,
+    )
 
     if rand_crop_and_resize:
         resize_lim = [0.8, 1.2]
@@ -1337,49 +1356,72 @@ def main(
         optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
         scheduler = None
 
+    import glob
     global_step = 0
-    if init_dir:
-        if load_step and load_optimizer and load_scheduler:
-            global_step = saverloader.load(
-                init_dir,
-                model,
-                optimizer=optimizer,
-                scheduler=scheduler,
-                ignore_load=ignore_load,
-                device_ids=device_ids,   
-                is_DP=False,
-            )
-        elif load_step and load_optimizer:
-            global_step = saverloader.load(
-                init_dir,
-                model,
-                optimizer=optimizer,
-                ignore_load=ignore_load,
-                device_ids=device_ids,
-                is_DP=False,
-            )
-            print("global_step:", global_step)
-        elif load_step:
-            global_step = saverloader.load(
-                init_dir,
-                model,
-                ignore_load=ignore_load,
-                device_ids=device_ids,
-                is_DP=False,
-            )
+    
+    
+    if not init_dir:
+        init_dir = ckpt_dir
+    
+    def _has_ckpt(folder: str) -> bool:
+        return len(glob.glob(os.path.join(folder, "model-*.pth"))) > 0
+    
+    def _do_load():
+        return saverloader.load(
+            init_dir,
+            model,
+            optimizer=optimizer if load_optimizer else None,
+            scheduler=scheduler if (load_scheduler and use_scheduler) else None,
+            ignore_load=ignore_load,
+            device_ids=device_ids,
+            is_DP=False,
+        )
+    
+    if _has_ckpt(init_dir) and load_step:
+        try:
+            global_step = _do_load()
+            print(f"✅ checkpoint loaded, global_step={global_step}")
+        except RuntimeError as e:
+            msg = str(e)
+            if ("Unexpected key(s)" in msg) or ("Missing key(s)" in msg):
+                print("⚠️ strict load failed (likely lazy-built modules like PointPillars/VoxelNeXt).")
+                print("⚠️ Running one warmup forward to build modules, then retrying...")
+    
+                model.eval()
+                with torch.no_grad():
+                    warm_sample = next(iter(train_dataloader))
+                    _ = run_model(
+                        model,
+                        seg_loss_fn,
+                        map_seg_loss_fn,
+                        warm_sample,
+                        Z, Y, X,
+                        device,
+                        sw=None,
+                        use_radar_encoder=use_radar_encoder,
+                        radar_encoder_type=radar_encoder_type,
+                        train_task=train_task,
+                        use_shallow_metadata=use_shallow_metadata,
+                        use_obj_layer_only_on_map=use_obj_layer_only_on_map,
+                        use_lidar=use_lidar,
+                        use_lidar_encoder=use_lidar_encoder,
+                        lidar_encoder_type=lidar_encoder_type,
+                    )
+                model.train()
+    
+                global_step = _do_load()
+                print(f"✅ checkpoint loaded after warmup, global_step={global_step}")
+            else:
+                raise
+    else:
+        if init_dir:
+            print(f"🟡 No checkpoint found in {init_dir} (or load_step=False); starting from scratch.")
         else:
-            _ = saverloader.load(
-                init_dir,
-                model,
-                ignore_load=ignore_load,
-                device_ids=device_ids,
-                is_DP=False,
-            )
-            global_step = 0
-        print('checkpoint loaded...')
-
-    if len(device_ids) > 1:
-        model = torch.nn.DataParallel(model, device_ids=device_ids)
+            print("🟡 init_dir empty; starting from scratch.")
+    
+    
+        if len(device_ids) > 1:
+            model = torch.nn.DataParallel(model, device_ids=device_ids)
 
     parameters = list(model.parameters())
 
@@ -1540,5 +1582,18 @@ if __name__ == '__main__':
     # Load the config file
     with open(args.config, 'r') as file:
         config = yaml.safe_load(file)
+    
+    # --- NEW: allow config to control stable run identity ---
+    run_name = config.pop("run_name", None)
+    wandb_project = config.pop("wandb_project", None)
+    wandb_run_id = config.pop("wandb_run_id", None)
+
+    if run_name:
+        os.environ["RUN_NAME"] = str(run_name)
+    if wandb_project:
+        os.environ["WANDB_PROJECT"] = str(wandb_project)
+    if wandb_run_id:
+        os.environ["WANDB_RUN_ID"] = str(wandb_run_id)
 
     main(**config)
+

@@ -33,7 +33,8 @@ nvidia-smi || true
 export CUDA_VISIBLE_DEVICES=0
 export WANDB__SERVICE_WAIT=300
 
-srun -u python train.py --config=configs/train/train_bev_clr_ad_L40S.yaml
+CFG="${1:-configs/train/train_bev_clr_ad_L40S.yaml}"
+srun -u python train.py --config="$CFG"
 
 #########################################################################################
 #Start: sbatch BEV_CLR_AD/configs/slurm/Train_L40S.slurm

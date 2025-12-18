@@ -2,9 +2,10 @@
 # Model / experiment name
 # ======================
 exp_name: 'BEV_CLR_AD'           # Used to build run names, checkpoint/log folders, and the W&B project name.
-run_name: "H100_Run08"           # fixer Ordnername für ckpt/logs und eindeutig pro run 
+run_name: "L40S_Run01"           # fixer Ordnername für ckpt/logs und eindeutig pro run 
 wandb_project: "BEV_CLR_AD"      # W&B Projekt (stabil)
-wandb_run_id: "H100_Run08"       # fixer Run-ID (pro Experiment eindeutig)
+wandb_run_id: "L40S_Run01"       # fixer Run-ID (pro Experiment eindeutig)
+
 
 # ======================
 # Training parameters
@@ -13,13 +14,13 @@ max_iters: 70000                 # Total optimization steps (NOT epochs). Effect
 log_freq: 100                    # How often to log scalars/images to TensorBoard/W&B (in steps).
 shuffle: true                    # Shuffle training samples each epoch (affects dataloader).
 dset: 'trainval'                 # Dataset split to load in nuscenes_data.compile_data (e.g., 'train', 'trainval', 'mini').
-save_freq: 1000                 # Save a checkpoint every N steps.
+save_freq: 1000                  # Save a checkpoint every N steps.
 batch_size: 1                    # Per-step mini-batch size (must be divisible by len(device_ids) if using DataParallel).
 grad_acc: 5                      # Gradient accumulation steps. Effective batch size = batch_size * grad_acc.
 lr: 0.0003                       # Peak LR for OneCycleLR (if use_scheduler=true); base LR for constant schedule otherwise.
 use_scheduler: true              # Use OneCycleLR schedule (warms up then anneals).
 weight_decay: 0.0000001          # Adam/AdamW weight decay (L2 regularization).
-nworkers: 8                    # DataLoader workers (increase until I/O saturates but avoid fork issues on your system).
+nworkers: 4                    # DataLoader workers (increase until I/O saturates but avoid fork issues on your system).
 
 # ======================
 # Directories
@@ -31,7 +32,7 @@ custom_dataroot: 'datasets/scaled_images'
 log_dir: 'logs_nuscenes'         # TensorBoard log root (a subfolder per run is created automatically).
 ckpt_dir: 'model_checkpoints'    # Where checkpoints are saved (a subfolder per run is created).
 keep_latest: 75                  # Keep only the latest N checkpoints (older ones are pruned).
-init_dir: 'model_checkpoints/H100_Run08'                     # Path to a checkpoint to resume from (folder containing ckpt + meta).
+init_dir: 'model_checkpoints/L40S_Run01'                     # Path to a checkpoint to resume from (folder containing ckpt + meta). #model_checkpoints/BEV_CLR_AD_1x5_3e-4s_19-54-19
 ignore_load: null                # Optional list/pattern of keys to ignore when loading a checkpoint state_dict.
 load_step: true                  # When resuming, load global_step from the checkpoint (controls naming/logging).
 load_optimizer: true             # When resuming, also load optimizer state.
@@ -45,8 +46,8 @@ rand_flip: true                 # Random horizontal/vertical flips for images/BE
 rand_crop_and_resize: true      # If true, use random resize + crop in the dataloader (resize_lim controls range).
 ncams: 6                         # Number of cameras per sample (nuScenes uses 6).
 nsweeps: 5                       # Number of RADAR sweeps to aggregate per sample (passed to the loader).
-lidar_nsweeps: 1                 # Number of LiDAR sweeps to aggregate per sample (used when use_lidar=true).
-grid_dim: [400, 8, 400]          # Voxel grid (Z, Y, X). Y is vertical bins; BEV plane is Z (forward) × X (right).
+lidar_nsweeps: 1                # Number of LiDAR sweeps to aggregate per sample (used when use_lidar=true).
+grid_dim: [200, 8, 200]          # Voxel grid (Z, Y, X). Y is vertical bins; BEV plane is Z (forward) × X (right).
 
 # ======================
 # Core task selection
@@ -86,13 +87,13 @@ use_shallow_metadata: true       # Enable 4-ch lightweight radar meta features (
 # ======================
 lidar_encoder_type: 'voxel_net'  # LiDAR BEV encoder type when use_lidar_encoder=true ('voxel_net', 'voxel_next', or 'pointpillars').
 use_lidar: true                  # Toggle LiDAR branch. (Your current data pipeline expects LiDAR present.)
-use_lidar_encoder: true          # If false, use the lightweight “occupancy compressor” (Option A) we added.
+use_lidar_encoder: true          # If false, use the lightweight “occupancy compressor”
 use_lidar_occupancy_map: false   # If true (and encoder supports), provide a 1-ch LiDAR occupancy map to the encoder.
 
 # ======================
 # Misc / model plumbing
 # ======================
-device_ids: [0,1,2,3,4,5,6,7]                  # GPU ids used by torch.nn.DataParallel. batch_size must be divisible by len(device_ids).
+device_ids: [0]                  # GPU ids used by torch.nn.DataParallel. batch_size must be divisible by len(device_ids).
 freeze_dino: true                # Freeze DINO-V2 backbone (saves memory & stabilizes; unfreeze to fine-tune at a cost).
 do_feat_enc_dec: true            # Apply BEV feature encoder–decoder refinement (ResNet18-like with skips) after fusion.
 combine_feat_init_w_learned_q: true
@@ -108,4 +109,4 @@ notes: 'BEV_CLR_AD model: radar encoding, LiDAR encoding, DINO as image backbone
 6 blocks, radar init, image init, multiscale feats, enc-dec, radar and LiDAR as query for fusion,
 with learnable queries'
                                  # Free-form run notes shown in W&B UI.
-name: 'BEV_CLR_AD'                   # W&B run name (shown in the project dashboard).
+name: 'BEV_CLR_AD'               # W&B run name (shown in the project dashboard).

@@ -45,14 +45,16 @@ export WANDB_CONSOLE=auto            # (off) for no console hijack
 
 # --- paths ---
 PROJECT_DIR="/home/es/es_es/es_luheit04/forschungsprojekt/BEV_CLR_AD"
-CONFIG_PATH="configs/train/train_bev_clr_ad_H100.yaml"
+#CONFIG_PATH="configs/train/train_bev_clr_ad_H100.yaml"
 
 cd "$PROJECT_DIR"
 
 # --- launch ---
+CFG="${1:-configs/train/train_bev_clr_ad_L40S.yaml}"
+
 # Single-node, 8 GPUs, torchrun standalone rendezvous
 torchrun --nproc_per_node=${SLURM_GPUS_ON_NODE:-8} --standalone \
-  train_DDP.py --config="$CONFIG_PATH"
+  train_DDP.py --config="$CFG"
 
 #torchrun --nproc_per_node=8 --standalone \ train_DDP.py --config="configs/train/train_bev_clr_ad.yaml"
 

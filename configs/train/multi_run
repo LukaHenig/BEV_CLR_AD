@@ -1,0 +1,23 @@
+#L40s
+#used config for multi-run submission
+cfg=configs/train/train_bev_clr_ad_L40S_run1.yaml
+
+# submit 4 sequential jobs, each depending on the previous one
+jid1=$(sbatch configs/slurm/Train_L40S.slurm "$cfg" | awk '{print $4}')
+jid2=$(sbatch --dependency=afterany:$jid1 configs/slurm/Train_L40S.slurm "$cfg" | awk '{print $4}')
+jid3=$(sbatch --dependency=afterany:$jid2 configs/slurm/Train_L40S.slurm "$cfg" | awk '{print $4}')
+jid4=$(sbatch --dependency=afterany:$jid3 configs/slurm/Train_L40S.slurm "$cfg" | awk '{print $4}')
+
+echo "submitted: $jid1 $jid2 $jid3 $jid4"
+
+#H100
+#used config for multi-run submission
+cfg=configs/train/train_bev_clr_ad_H100.yaml
+
+# submit 4 sequential jobs, each depending on the previous one
+jid1=$(sbatch configs/slurm/Train_DDP_H100_8nodes.slurm "$cfg" | awk '{print $4}')
+jid2=$(sbatch --dependency=afterany:$jid1 configs/slurm/Train_DDP_H100_8nodes.slurm "$cfg" | awk '{print $4}')
+jid3=$(sbatch --dependency=afterany:$jid2 configs/slurm/Train_DDP_H100_8nodes.slurm "$cfg" | awk '{print $4}')
+jid4=$(sbatch --dependency=afterany:$jid3 configs/slurm/Train_DDP_H100_8nodes.slurm "$cfg" | awk '{print $4}')
+
+echo "submitted: $jid1 $jid2 $jid3 $jid4"

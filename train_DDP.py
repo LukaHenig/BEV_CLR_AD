@@ -1146,17 +1146,23 @@ def main(
         print("CUDA is --- NOT --- available")
     dist.barrier()
 
-    # autogen a name
-    model_name = "%d" % B
-    if grad_acc > 1:
-        model_name += "x%d" % grad_acc
-    if world_size > 1:
-        model_name += "x%d" % world_size
-    lrn = "%.1e" % lr  # e.g., 5.0e-04
-    lrn = lrn[0] + lrn[3:5] + lrn[-1]  # e.g., 5e-4
-    model_name += "_%s" % lrn
-    if use_scheduler:
-        model_name += "s"
+    fixed = os.environ.get("RUN_NAME", "").strip()  
+
+    if fixed:
+        model_name = fixed
+        print('Using fixed model_name from env RUN_NAME: %s' % model_name)
+    else:
+        # autogen a name
+        model_name = "%d" % B
+        if grad_acc > 1:
+            model_name += "x%d" % grad_acc
+        if world_size > 1:
+            model_name += "x%d" % world_size
+        lrn = "%.1e" % lr  # e.g., 5.0e-04
+        lrn = lrn[0] + lrn[3:5] + lrn[-1]  # e.g., 5e-4
+        model_name += "_%s" % lrn
+        if use_scheduler:
+            model_name += "s"
 
     import datetime
     model_date = datetime.datetime.now().strftime('%H-%M-%S')
@@ -1267,8 +1273,21 @@ def main(
     }
 
     if is_master:
-        wandb.init(project=model_name, entity="esslingen-university", config=wandb_config, group=group, notes=notes, name=name)
-    # no barrier here
+        #wandb.init(project=model_name, entity="esslingen-university", config=wandb_config, group=group, notes=notes, name=name)
+        wandb_project = os.environ.get("WANDB_PROJECT", "BEV_CLR_AD").strip()
+        wandb_run_id = os.environ.get("WANDB_RUN_ID", "").strip()  # muss über Jobs konstant sein!
+
+        wandb.init(
+            project=wandb_project + '_' + fixed,
+            entity="esslingen-university",
+            config=wandb_config,
+            group=group,
+            notes=notes,
+            name=model_name,                 
+            id=wandb_run_id if wandb_run_id else None,
+            resume="allow" if wandb_run_id else None,
+        )
+        # no barrier here
 
     if rand_crop_and_resize:
         resize_lim = [0.8, 1.2]
@@ -1563,4 +1582,16 @@ if __name__ == '__main__':
     with open(args.config, 'r') as file:
         config = yaml.safe_load(file)
 
+      # --- NEW: allow config to control stable run identity ---
+    run_name = config.pop("run_name", None)
+    wandb_project = config.pop("wandb_project", None)
+    wandb_run_id = config.pop("wandb_run_id", None)
+
+    if run_name:
+        os.environ["RUN_NAME"] = str(run_name)
+    if wandb_project:
+        os.environ["WANDB_PROJECT"] = str(wandb_project)
+    if wandb_run_id:
+        os.environ["WANDB_RUN_ID"] = str(wandb_run_id)
+    
     main(**config)

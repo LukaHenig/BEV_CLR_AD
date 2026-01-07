@@ -929,7 +929,7 @@ def main(
     print('Total parameters (trainable + fixed)', total_params)
 
     # load checkpoint
-    _ = saverloader.load(init_dir, model.module, ignore_load=ignore_load, is_DP=True, step=load_step)
+    _ = saverloader.load(init_dir, model.module, ignore_load=ignore_load, is_DP=True, step=load_step, strict=False)
     global_step = 0
     requires_grad(parameters, False)
     model.eval()

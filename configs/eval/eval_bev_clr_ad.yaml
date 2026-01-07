@@ -21,10 +21,10 @@ data_dir: '/../../../../../../beegfs/scratch/workspace/es_luheit04-NuScneDataset
 custom_dataroot: 'datasets/scaled_images'
                                  # Optional pre-scaled images root used when use_pre_scaled_imgs=true.
 log_dir: 'logs_eval'             # TensorBoard/TensorboardX evaluation log root.
-init_dir: 'model_checkpoints/BEV_CLR_AD_1x5_3e-4s_10-20-51'
+init_dir: 'model_checkpoints/L40S_Run02'
                                  # Directory containing the checkpoint to evaluate.
 ignore_load: null                # Optional list/pattern of keys to ignore when loading the checkpoint.
-load_step: 35000                 # Specific training step checkpoint to load (set to null to load latest).
+load_step: 50000                 # Specific training step checkpoint to load (set to null to load latest).
 
 # ======================
 # Data parameters
@@ -40,7 +40,7 @@ grid_dim: [200, 8, 200]          # Voxel grid (Z, Y, X). Y is vertical bins; BEV
 # ======================
 encoder_type: 'dino_v2'          # Image backbone: 'dino_v2' (ViT-B/14 adapter).
 radar_encoder_type: 'voxel_net'  # RADAR BEV encoder: currently 'voxel_net' (sparse voxel feature net).
-lidar_encoder_type: 'voxel_net'  # LiDAR BEV encoder type when use_lidar_encoder=true ('voxel_net', 'voxel_next', or 'pointpillars').
+lidar_encoder_type: 'voxel_next'  # LiDAR BEV encoder type when use_lidar_encoder=true ('voxel_net', 'voxel_next', or 'pointpillars').
 use_rpn_radar: false             # Keep RPN disabled as in training.
 train_task: 'both'               # Shared decoder for objects and semantic map tasks.
 use_radar: true                  # Enable RADAR branch during inference.
@@ -59,7 +59,7 @@ do_rgbcompress: true             # Apply minor convolutional compression on 2D f
 use_multi_scale_img_feats: true  # Use 4/8/16/32 features as keys for cross-attention (richer, heavier).
 num_layers: 6                    # Number of transformer encoder & fuser blocks (stacked).
 gate_entropy_weight: 0.01       # Weight for the gate entropy regularization term.
-query_gate_mode: 'off'      # 'learned' (MLP gate), 'fixed' (use query_gate_fixed_weights), or 'off'.
+query_gate_mode: 'learned'      # 'learned' (MLP gate), 'fixed' (use query_gate_fixed_weights), or 'off'.
 query_gate_fixed_weights: [0.5, 0.5]  # Radar/LiDAR weights when query_gate_mode='fixed'.
 
 # ======================

@@ -503,7 +503,7 @@ def reduce_loss_metrics(total_loss: torch.Tensor, metrics: dict, train_task: str
 def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
               use_radar_encoder=None, radar_encoder_type=None, train_task='both',
               is_master=False, use_shallow_metadata=True,
-              use_obj_layer_only_on_map=False,
+              use_obj_layer_only_on_map=True,
               use_lidar=False, use_lidar_encoder=False,
               lidar_encoder_type=None, use_lidar_occupancy_map=False):
     metrics = {}
@@ -605,9 +605,20 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
         lid_data  = lid_data[:, :lid_keep, :]
 
         xyz_lid       = lid_data[:, :, :3]
-        lid_intensity = lid_data[:, :, 3:4]
+        lid_intensity = lid_data[:, :, 3:4]  
+
+        # add a branch for voxelnext
+        if lidar_encoder_type == 'voxel_net' or lidar_encoder_type == 'pointpillars':
+            lid_feats = lid_intensity          # 1 channel: intensity
+        elif lidar_encoder_type == 'voxel_next':
+            # include intensity and timestamp
+            lid_feats = lid_data[:, :, 3:5]    # (B, V, 2)
+        else:
+            raise ValueError(f"Unsupported lidar encoder: {lidar_encoder_type}")          
     else:
         xyz_lid = None
+
+    
 
     B, S, C, H, W = rgb_camXs.shape
 
@@ -668,12 +679,12 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
                    f"LIDAR xyz/feat mismatch: {lid_xyz_cam0.shape} vs {lid_intensity.shape}"
 
             lid_vox_feats, lid_vox_coords, lid_num_vox = vox_util.voxelize_xyz_and_feats_voxelnet(
-                lid_xyz_cam0, lid_intensity, Z, Y, X,
+                lid_xyz_cam0, lid_feats, Z, Y, X,
                 assert_cube=False,
-                use_radar_occupancy_map=False,
                 clean_eps=0.0,
-                max_voxels=6000  # e.g., 6k for LiDAR
+                max_voxels=6000
             )
+
 
             # The model expects a (features, coords, num_vox) tuple
             lid_occ_mem0 = (lid_vox_feats, lid_vox_coords, lid_num_vox)
@@ -721,8 +732,16 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device, sw=None,
     if gate_reg_loss is not None:
         total_loss = total_loss + gate_reg_loss
         metrics["gate_reg_loss"] = gate_reg_loss.detach()
+    
+    fusion_debug = factors.get("fusion_debug")
+    if fusion_debug:
+        for key, value in fusion_debug.items():
+            if torch.is_tensor(value):
+                metrics[key] = value.detach()
+            else:
+                metrics[key] = torch.tensor(value, device=device)
 
-    # get bev map from masks
+    # get Bev map from masks
     if train_task == 'both' or train_task == 'map':
 
         if train_task == 'both':
@@ -1386,27 +1405,72 @@ def main(
         print('Total parameters (trainable + fixed)', total_params)
 
     # load checkpoint
+    import glob
     global_step = 0
-    if init_dir:
-        if load_step and load_optimizer and load_scheduler:
-            global_step = saverloader.load(init_dir, model, optimizer, scheduler=scheduler,
-                                           ignore_load=ignore_load, device_ids=[local_rank], is_DP=False)
-        elif load_step and load_optimizer:
-            global_step = saverloader.load(init_dir, model, optimizer, ignore_load=ignore_load,
-                                           device_ids=[local_rank])
-            print("global_step: ", global_step)
-        elif load_step:
-            global_step = saverloader.load(init_dir, model, ignore_load=ignore_load, device_ids=[local_rank])
+    if not init_dir:
+        init_dir = ckpt_dir
+    
+    def _has_ckpt(folder: str) -> bool:
+        return len(glob.glob(os.path.join(folder, "model-*.pth"))) > 0
+    
+    def _do_load():
+        return saverloader.load(
+            init_dir,
+            model,
+            optimizer=optimizer if load_optimizer else None,
+            scheduler=scheduler if (load_scheduler and use_scheduler) else None,
+            ignore_load=ignore_load,
+            device_ids=device_ids,
+            is_DP=False,
+        )
+    
+    if _has_ckpt(init_dir) and load_step:
+        try:
+            global_step = _do_load()
+            print(f"✅ checkpoint loaded, global_step={global_step}")
+        except RuntimeError as e:
+            msg = str(e)
+            if ("Unexpected key(s)" in msg) or ("Missing key(s)" in msg):
+                print("⚠️ strict load failed (likely lazy-built modules like PointPillars/VoxelNeXt).")
+                print("⚠️ Running one warmup forward to build modules, then retrying...")
+    
+                model.eval()
+                with torch.no_grad():
+                    warm_sample = next(iter(train_dataloader))
+                    _ = run_model(
+                        model,
+                        seg_loss_fn,
+                        map_seg_loss_fn,
+                        warm_sample,
+                        Z, Y, X,
+                        device,
+                        sw=None,
+                        use_radar_encoder=use_radar_encoder,
+                        radar_encoder_type=radar_encoder_type,
+                        train_task=train_task,
+                        use_shallow_metadata=use_shallow_metadata,
+                        use_obj_layer_only_on_map=use_obj_layer_only_on_map,
+                        use_lidar=use_lidar,
+                        use_lidar_encoder=use_lidar_encoder,
+                        lidar_encoder_type=lidar_encoder_type,
+                    )
+                model.train()
+    
+                global_step = _do_load()
+                print(f"✅ checkpoint loaded after warmup, global_step={global_step}")
+            else:
+                raise
+    else:
+        if init_dir:
+            print(f"🟡 No checkpoint found in {init_dir} (or load_step=False); starting from scratch.")
         else:
-            _ = saverloader.load(init_dir, model, ignore_load=ignore_load)
-            global_step = 0
-
-        optimizer.param_groups[0]['capturable'] = True
+            print("🟡 init_dir empty; starting from scratch.")
+    
 
     model = DDP(
         model,
         device_ids=[local_rank],
-        find_unused_parameters=False,          
+        find_unused_parameters=True,          
         gradient_as_bucket_view=True          
     )
 

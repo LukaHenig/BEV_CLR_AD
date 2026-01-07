@@ -929,7 +929,51 @@ def main(
     print('Total parameters (trainable + fixed)', total_params)
 
     # load checkpoint
-    _ = saverloader.load(init_dir, model.module, ignore_load=ignore_load, is_DP=True, step=load_step)
+    def _do_load():
+        return saverloader.load(
+            init_dir,
+            model.module,
+            ignore_load=ignore_load,
+            is_DP=True,
+            step=load_step,
+        )
+
+    try:
+        _do_load()
+        print("✅ checkpoint loaded")
+    except RuntimeError as e:
+        msg = str(e)
+        if ("Unexpected key(s)" in msg) or ("Missing key(s)" in msg):
+            print("⚠️ strict load failed (likely lazy-built modules like PointPillars/VoxelNeXt).")
+            print("⚠️ Running one warmup forward to build modules, then retrying...")
+
+            model.eval()
+            with torch.no_grad():
+                warm_sample = next(iter(val_dataloader))
+                _ = run_model(
+                    model,
+                    seg_loss_fn,
+                    map_seg_loss_fn,
+                    warm_sample,
+                    Z,
+                    Y,
+                    X,
+                    device,
+                    sw=None,
+                    use_radar_encoder=use_radar_encoder,
+                    radar_encoder_type=radar_encoder_type,
+                    train_task=train_task,
+                    use_shallow_metadata=use_shallow_metadata,
+                    use_obj_layer_only_on_map=use_obj_layer_only_on_map,
+                    use_lidar=use_lidar,
+                    use_lidar_encoder=use_lidar_encoder,
+                    lidar_encoder_type=lidar_encoder_type,
+                )
+
+            _do_load()
+            print("✅ checkpoint loaded after warmup")
+        else:
+            raise
     global_step = 0
     requires_grad(parameters, False)
     model.eval()

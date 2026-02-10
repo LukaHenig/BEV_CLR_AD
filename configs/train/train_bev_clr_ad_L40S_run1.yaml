@@ -2,9 +2,9 @@
 # Model / experiment name
 # ======================
 exp_name: 'BEV_CLR_AD'           # Used to build run names, checkpoint/log folders, and the W&B project name.
-run_name: "L40S_Run01.2"           # fixer Ordnername für ckpt/logs und eindeutig pro run 
+run_name: "L40S_Run01"           # fixer Ordnername für ckpt/logs und eindeutig pro run 
 wandb_project: "BEV_CLR_AD"      # W&B Projekt (stabil)
-wandb_run_id: "L40S_Run01.2"       # fixer Run-ID (pro Experiment eindeutig)
+wandb_run_id: "L40S_Run01"       # fixer Run-ID (pro Experiment eindeutig)
 
 
 # ======================
@@ -32,7 +32,7 @@ custom_dataroot: 'datasets/scaled_images'
 log_dir: 'logs_nuscenes'         # TensorBoard log root (a subfolder per run is created automatically).
 ckpt_dir: 'model_checkpoints'    # Where checkpoints are saved (a subfolder per run is created).
 keep_latest: 75                  # Keep only the latest N checkpoints (older ones are pruned).
-init_dir: 'model_checkpoints/L40S_Run01.2'                     # Path to a checkpoint to resume from (folder containing ckpt + meta). #model_checkpoints/BEV_CLR_AD_1x5_3e-4s_19-54-19
+init_dir: 'model_checkpoints/L40S_Run01'                     # Path to a checkpoint to resume from (folder containing ckpt + meta). #model_checkpoints/BEV_CLR_AD_1x5_3e-4s_19-54-19
 ignore_load: null                # Optional list/pattern of keys to ignore when loading a checkpoint state_dict.
 load_step: true                  # When resuming, load global_step from the checkpoint (controls naming/logging).
 load_optimizer: true             # When resuming, also load optimizer state.
@@ -66,7 +66,7 @@ do_rgbcompress: true             # Minor convolutional compression step on 2D fe
 do_shuffle_cams: true            # Randomize camera order within a sample (prevents positional bias).
 use_multi_scale_img_feats: true  # Use 4/8/16/32 features as keys for cross-attention (richer, heavier).
 num_layers: 6                    # Number of transformer encoder & fuser blocks (stacked).
-gate_entropy_weight: 0.0001       # Weight for the gate entropy regularization term.
+gate_entropy_weight: 0.01       # Weight for the gate entropy regularization term.
 query_gate_mode: 'learned'      # 'learned' (MLP gate), 'fixed' (use query_gate_fixed_weights), or 'off'.
 query_gate_fixed_weights: [0.5, 0.5]  # Radar/LiDAR weights when query_gate_mode='fixed'.
 

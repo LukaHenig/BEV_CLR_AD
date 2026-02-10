@@ -9,6 +9,7 @@
 #SBATCH --output=logs_eval/%x_%j.out
 #SBATCH --chdir=/home/es/es_es/es_luheit04/forschungsprojekt/BEV_CLR_AD
 
+
 set -e  
 
 mkdir -p logs_eval

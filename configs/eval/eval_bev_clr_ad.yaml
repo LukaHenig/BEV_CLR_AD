@@ -10,7 +10,7 @@ log_freq: 100                    # Logging cadence (steps) for evaluation metric
 shuffle: false                   # Keep deterministic ordering for evaluation.
 dset: 'trainval'                 # Evaluate on the trainval split to mirror training data coverage.
 batch_size: 1                    # Evaluation uses batch size 1 (DataParallel still splits across device_ids).
-nworkers: 4                      # DataLoader workers; align with training unless resources require fewer.
+nworkers: 1                      # DataLoader workers; align with training unless resources require fewer.
 do_drn_val_split: true           # Also report metrics per day/rain/night subsets.
 
 # ======================
@@ -21,7 +21,7 @@ data_dir: '/../../../../../../beegfs/scratch/workspace/es_luheit04-NuScneDataset
 custom_dataroot: 'datasets/scaled_images'
                                  # Optional pre-scaled images root used when use_pre_scaled_imgs=true.
 log_dir: 'logs_eval'             # TensorBoard/TensorboardX evaluation log root.
-init_dir: 'model_checkpoints/L40S_Run02'
+init_dir: 'model_checkpoints/L40S_Run08'
                                  # Directory containing the checkpoint to evaluate.
 ignore_load: null                # Optional list/pattern of keys to ignore when loading the checkpoint.
 load_step: 50000                 # Specific training step checkpoint to load (set to null to load latest).
@@ -44,7 +44,7 @@ lidar_encoder_type: 'voxel_next'  # LiDAR BEV encoder type when use_lidar_encode
 use_rpn_radar: false             # Keep RPN disabled as in training.
 train_task: 'both'               # Shared decoder for objects and semantic map tasks.
 use_radar: true                  # Enable RADAR branch during inference.
-use_radar_filters: true          # Apply classical radar filtering to mirror training preprocessing.
+use_radar_filters: false          # Apply classical radar filtering to mirror training preprocessing.
 use_radar_encoder: true          # Expect (features, coords, num_voxels) tuple and run VoxelNet.
 use_radar_occupancy_map: false   # Do not swap to occupancy-map-based radar encoding.
 use_metaradar: false             # Disable handcrafted radar meta features (not used with VoxelNet tuple).
@@ -59,7 +59,7 @@ do_rgbcompress: true             # Apply minor convolutional compression on 2D f
 use_multi_scale_img_feats: true  # Use 4/8/16/32 features as keys for cross-attention (richer, heavier).
 num_layers: 6                    # Number of transformer encoder & fuser blocks (stacked).
 gate_entropy_weight: 0.01       # Weight for the gate entropy regularization term.
-query_gate_mode: 'learned'      # 'learned' (MLP gate), 'fixed' (use query_gate_fixed_weights), or 'off'.
+query_gate_mode: 'off'      # 'learned' (MLP gate), 'fixed' (use query_gate_fixed_weights), or 'off'.
 query_gate_fixed_weights: [0.5, 0.5]  # Radar/LiDAR weights when query_gate_mode='fixed'.
 
 # ======================

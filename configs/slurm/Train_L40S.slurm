@@ -9,6 +9,8 @@
 #SBATCH --job-name=bev_clr_ad_L40s_train
 #SBATCH --chdir=/home/es/es_es/es_luheit04/forschungsprojekt/BEV_CLR_AD
 #SBATCH --output=logs_train/train_L40S/%x_%j.out
+#SBATCH --exclude=gpu126
+
 
 set -e  
 

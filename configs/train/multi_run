@@ -1,6 +1,6 @@
 #L40s
 #used config for multi-run submission
-cfg=configs/train/train_bev_clr_ad_L40S_run9.yaml
+cfg=configs/train/train_bev_clr_ad_L40S_run1.yaml
 
 # submit 4 sequential jobs, each depending on the previous one
 jid1=$(sbatch configs/slurm/Train_L40S.slurm "$cfg" | awk '{print $4}')

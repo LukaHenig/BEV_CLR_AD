@@ -1113,7 +1113,7 @@ def main(
     assert (model_type in ['transformer', 'simple_lift_fuse', 'SimpleBEV_map'])
     # debug only  - check for CUDA
     if device_ids is None:
-        device_ids = [0]
+        device_ids = [local_rank]
 
     B = batch_size
     Z, Y, X = grid_dim
@@ -1149,6 +1149,10 @@ def main(
     torch.cuda.empty_cache()
     device = torch.device(f"cuda:{local_rank}")
 
+    # --- DDP: pro Prozess genau 1 GPU benutzen ---
+    # YAML 'device_ids: [0..7]' ist DataParallel-Style und muss in DDP ignoriert werden
+    device_ids = [local_rank]
+
     dist.barrier()
     # debug only
     if torch.cuda.is_available():
@@ -1183,11 +1187,12 @@ def main(
         if use_scheduler:
             model_name += "s"
 
-    import datetime
-    model_date = datetime.datetime.now().strftime('%H-%M-%S')
-    model_name = model_name + '_' + model_date
+        import datetime
+        model_date = datetime.datetime.now().strftime('%H-%M-%S')
+        model_name = model_name + '_' + model_date
 
-    model_name = exp_name + '_' + model_name
+        model_name = exp_name + '_' + model_name
+        print('model_name', model_name)
 
     # set up ckpt and logging
     ckpt_dir = os.path.join(ckpt_dir, model_name)
@@ -1420,7 +1425,7 @@ def main(
             optimizer=optimizer if load_optimizer else None,
             scheduler=scheduler if (load_scheduler and use_scheduler) else None,
             ignore_load=ignore_load,
-            device_ids=device_ids,
+            device_ids=[local_rank],
             is_DP=False,
         )
     
@@ -1428,6 +1433,14 @@ def main(
         try:
             global_step = _do_load()
             print(f"✅ checkpoint loaded, global_step={global_step}")
+
+            # --- FIX: Optimizer state (exp_avg/exp_avg_sq etc.) auf die richtige GPU schieben ---
+            if load_optimizer:
+                for state in optimizer.state.values():
+                    for k, v in state.items():
+                        if torch.is_tensor(v):
+                            state[k] = v.to(device)
+
         except RuntimeError as e:
             msg = str(e)
             if ("Unexpected key(s)" in msg) or ("Missing key(s)" in msg):
@@ -1470,7 +1483,7 @@ def main(
     model = DDP(
         model,
         device_ids=[local_rank],
-        find_unused_parameters=True,          
+        find_unused_parameters=False,          
         gradient_as_bucket_view=True          
     )
 

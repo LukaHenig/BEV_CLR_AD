@@ -430,16 +430,24 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
     shallow_meta_rad = rad_data[:, :, 5:8]
 
     if use_lidar:
-        lid_data = lidar_data.to(device).permute(0, 2, 1)  # (B, V_lid, 5)
+        lid_data = lidar_data.to(device).permute(0, 2, 1)  # (B, V_lid, 5) -> [x,y,z,intensity,time]
         lid_valid = (lid_data.abs().sum(dim=-1) > 0)
         lid_keep = lid_valid.sum(dim=1).max().item()
         lid_data = lid_data[:, :lid_keep, :]
 
         xyz_lid = lid_data[:, :, :3]
         lid_intensity = lid_data[:, :, 3:4]
+
+        if lidar_encoder_type in ['voxel_net', 'pointpillars']:
+            lid_feats = lid_intensity
+        elif lidar_encoder_type == 'voxel_next':
+            lid_feats = lid_data[:, :, 3:5]
+        else:
+            lid_feats = lid_intensity
     else:
         xyz_lid = None
         lid_intensity = None
+        lid_feats = None
 
     B, S, C, H, W = rgb_camXs.shape
 
@@ -494,14 +502,14 @@ def run_model(model, loss_fn, map_seg_loss_fn, d, Z, Y, X, device='cuda:0', sw=N
     lid_occ_mem0 = None
     if use_lidar and lid_xyz_cam0 is not None:
         if use_lidar_encoder and lidar_encoder_type in ['voxel_net', 'voxel_next', 'pointpillars']:
-            # Grundvoraussetzungen: Intensitäten müssen zur XYZ-Form passen
-            assert lid_intensity is not None, "LiDAR intensity features required for voxel encoder"
-            assert lid_xyz_cam0.shape[:2] == lid_intensity.shape[:2], \
-                f"LiDAR xyz/feat mismatch: {lid_xyz_cam0.shape} vs {lid_intensity.shape}"
+            # Grundvoraussetzungen: Features müssen zur XYZ-Form passen
+            assert lid_feats is not None, "LiDAR features required for voxel encoder"
+            assert lid_xyz_cam0.shape[:2] == lid_feats.shape[:2], \
+                f"LiDAR xyz/feat mismatch: {lid_xyz_cam0.shape} vs {lid_feats.shape}"
     
             # Voxelize für voxel-basierte Encoder: erwartet Tuple (features, coords, num_vox)
             lid_vox_feats, lid_vox_coords, lid_num_vox = vox_util.voxelize_xyz_and_feats_voxelnet(
-                lid_xyz_cam0, lid_intensity, Z, Y, X,
+                lid_xyz_cam0, lid_feats, Z, Y, X,
                 assert_cube=False,
                 use_radar_occupancy_map=False,
                 clean_eps=0.0,
@@ -929,7 +937,51 @@ def main(
     print('Total parameters (trainable + fixed)', total_params)
 
     # load checkpoint
-    _ = saverloader.load(init_dir, model.module, ignore_load=ignore_load, is_DP=True, step=load_step)
+    def _do_load():
+        return saverloader.load(
+            init_dir,
+            model.module,
+            ignore_load=ignore_load,
+            is_DP=True,
+            step=load_step,
+        )
+
+    try:
+        _do_load()
+        print("✅ checkpoint loaded")
+    except RuntimeError as e:
+        msg = str(e)
+        if ("Unexpected key(s)" in msg) or ("Missing key(s)" in msg):
+            print("⚠️ strict load failed (likely lazy-built modules like PointPillars/VoxelNeXt).")
+            print("⚠️ Running one warmup forward to build modules, then retrying...")
+
+            model.eval()
+            with torch.no_grad():
+                warm_sample = next(iter(val_dataloader))
+                _ = run_model(
+                    model,
+                    seg_loss_fn,
+                    map_seg_loss_fn,
+                    warm_sample,
+                    Z,
+                    Y,
+                    X,
+                    device,
+                    sw=None,
+                    use_radar_encoder=use_radar_encoder,
+                    radar_encoder_type=radar_encoder_type,
+                    train_task=train_task,
+                    use_shallow_metadata=use_shallow_metadata,
+                    use_obj_layer_only_on_map=use_obj_layer_only_on_map,
+                    use_lidar=use_lidar,
+                    use_lidar_encoder=use_lidar_encoder,
+                    lidar_encoder_type=lidar_encoder_type,
+                )
+
+            _do_load()
+            print("✅ checkpoint loaded after warmup")
+        else:
+            raise
     global_step = 0
     requires_grad(parameters, False)
     model.eval()

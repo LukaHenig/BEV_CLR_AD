@@ -1,0 +1,14 @@
+name: bev_clr_ad
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - setuptools<82
+  - wheel
+  - numpy=1.23.5
+  - sympy
+  - pyyaml
+  - matplotlib
+  - scikit-image=0.19.3
+  - requests

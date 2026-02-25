@@ -61,25 +61,63 @@ We evaluate on the nuScenes dataset. Download the dataset from the [nuScenes web
 
 ## 🧪 Environment setup
 
-The project targets Python 3.10, PyTorch 2.1.2, and CUDA 11.8. A typical conda-based setup looks like:
+The project targets **Python 3.10** and is tested with **PyTorch 2.5.1 (cu121 wheels)**.
+On our cluster, the deformable attention CUDA ops are compiled on a GPU node with the **CUDA 12.4 module** loaded.
+
+A typical conda-based setup looks like:
 
 ```
-conda create --name bev_clr_ad python=3.10
+conda env create -f environment.yml
 conda activate bev_clr_ad
-conda install pytorch=2.1.2 torchvision=0.16.2 torchaudio=2.1.2 pytorch-cuda=11.8 -c pytorch -c nvidia
-conda install pip
-conda install xformers -c xformers
-pip install -r requirements.txt
+
+# Safety pins for this project/toolchain
+python -m pip install "setuptools<82" wheel
+python -m pip install "numpy<2"
+
+# Install PyTorch separately (must match our working setup)
+python -m pip install --index-url https://download.pytorch.org/whl/cu121 \
+  torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1
+
+# Python dependencies (project requirements, excluding torch/xformers/spconv/cumm)
+python -m pip install -r requirements-pip-freeze.txt
+
+# Optional (otherwise only warnings about missing xFormers)
+conda install xformers -c xformers -y
+
+# Required for VoxelNeXt sparse backbone
+python -m pip install cumm-cu124==0.7.11 spconv-cu124==2.3.8
 ```
 
-Compile the deformable attention CUDA ops once per environment:
+Compile the deformable attention CUDA ops once per environment (on a GPU node with CUDA toolkit available):
 
 ```
+# Example: start an interactive GPU shell (cluster-specific)
+srun --partition=gpu1 --gres=gpu:1 --time=08:00:00 --nodes=1 --ntasks=1 --mem=64G --pty /bin/bash
+
+# Load CUDA toolkit for compilation (cluster-specific module name)
+module purge
+module load devel/cuda/12.4
+
+conda activate bev_clr_ad
 cd nets/ops
+rm -rf build *.so **/*.so 2>/dev/null || true
 sh make.sh
-python test.py  # optional correctness check
+python test.py  # optional correctness check (should print multiple True checks)
 cd ../..
 ```
+
+Start training (example):
+
+```
+CUDA_VISIBLE_DEVICES=0 python train.py --config='configs/train/train_bev_clr_ad_L40S_run1.yaml'
+```
+
+### Notes
+
+* Do **not** install `MultiScaleDeformableAttention` via `pip`; it is built locally in `nets/ops`.
+* Do **not** add `torch`, `torchvision`, `torchaudio`, `xformers`, `spconv`, or `cumm` to `requirements-pip-freeze.txt` (they are installed separately as shown above).
+* If you see a NumPy compatibility issue, re-pin NumPy with `python -m pip install "numpy<2"`.
+* If you see `No module named pkg_resources`, re-pin setuptools with `python -m pip install "setuptools<82"`.
 
 ---
 

@@ -5,8 +5,8 @@ events.out.tfevents.*
 *.out
 
 # Checkpoints / Modelle
-#/model_checkpoints/*
-*.pth
+/model_checkpoints/*
+#*.pth
 
 
 # WandB Logs und Ordner

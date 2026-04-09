@@ -1,0 +1,372 @@
+"""
+Implementation of the VoxelNeXt sparse convolution backbone.
+
+This module adapts the official VoxelNeXt backbone from the
+`dvlab-research/VoxelNeXt` repository so that it can be dropped into
+projects that do not rely on the entire OpenPCDet codebase.  It
+replicates the six-layer sparse 3D convolutional backbone used in
+VoxelNeXt, including residual blocks and downsampling stages.  The
+network operates on sparse voxel tensors (``spconv.SparseConvTensor``)
+and therefore requires the ``spconv`` Python package to be installed
+(see https://github.com/traveller59/spconv for installation details).
+
+The forward method accepts a ``batch_dict`` containing ``voxel_features``,
+``voxel_coords`` and ``batch_size`` and returns the same dictionary
+with an added key ``encoded_spconv_tensor`` holding the BEV feature map.
+"""
+
+from __future__ import annotations
+
+from functools import partial
+from typing import Dict, Any
+
+import torch
+import torch.nn as nn
+
+try:
+    from spconv.pytorch import SparseConvTensor, SubMConv3d, SparseConv3d, SparseInverseConv3d, SubMConv2d, SparseConv2d, SparseSequential, SparseModule
+except ImportError as e:
+    raise ImportError(
+        "The spconv package is required to use the VoxelNeXt sparse backbone. "
+        "Please install spconv (https://github.com/traveller59/spconv) before "
+        "importing this module." ) from e
+
+
+def replace_feature(tensor: SparseConvTensor, new_features: torch.Tensor) -> SparseConvTensor:
+    """Replace the feature tensor of a sparse tensor without changing its indices.
+
+    Args:
+        tensor: The original sparse tensor.
+        new_features: New feature matrix with the same number of points as
+            ``tensor.features``.
+
+    Returns:
+        A new ``SparseConvTensor`` with ``new_features`` and the same
+        ``indices``, ``spatial_shape`` and ``batch_size`` as ``tensor``.
+    """
+    return SparseConvTensor(
+        features=new_features,
+        indices=tensor.indices,
+        spatial_shape=tensor.spatial_shape,
+        batch_size=tensor.batch_size,
+    )
+
+
+def post_act_block(in_channels: int,
+                   out_channels: int,
+                   kernel_size: int,
+                   indice_key: str | None = None,
+                   stride: int = 1,
+                   padding: int = 0,
+                   conv_type: str = 'subm',
+                   norm_fn: nn.Module = None) -> SparseSequential:
+    """Create a sparse convolutional block with a convolution, normalization and ReLU.
+
+    Depending on ``conv_type`` one of ``SubMConv3d``, ``SparseConv3d`` or
+    ``SparseInverseConv3d`` will be used.  The returned module is a
+    ``SparseSequential`` container wrapping the convolution, norm and
+    activation.
+
+    Args:
+        in_channels: Number of input channels.
+        out_channels: Number of output channels.
+        kernel_size: Convolution kernel size.
+        indice_key: Key used by spconv to share index mappings across layers.
+        stride: Stride for the convolution (only used for ``spconv`` type).
+        padding: Padding for the convolution (only used for ``spconv`` type).
+        conv_type: Either ``'subm'`` (submanifold convolution), ``'spconv'``
+            (sparse convolution) or ``'inverseconv'`` (sparse inverse
+            convolution).
+        norm_fn: Normalization layer constructor.  Typically
+            ``partial(nn.BatchNorm1d, eps=1e-3, momentum=0.01)``.
+    """
+    if conv_type == 'subm':
+        conv = SubMConv3d(in_channels, out_channels, kernel_size, bias=False, indice_key=indice_key)
+    elif conv_type == 'spconv':
+        conv = SparseConv3d(in_channels, out_channels, kernel_size, stride=stride, padding=padding,
+                            bias=False, indice_key=indice_key)
+    elif conv_type == 'inverseconv':
+        conv = SparseInverseConv3d(in_channels, out_channels, kernel_size, indice_key=indice_key, bias=False)
+    else:
+        raise NotImplementedError(f"Unsupported conv_type: {conv_type}")
+
+    assert norm_fn is not None, "norm_fn must be provided to build normalization layers."
+    m = SparseSequential(
+        conv,
+        norm_fn(out_channels),
+        nn.ReLU(),
+    )
+    return m
+
+
+class SparseBasicBlock(SparseModule):
+    """Two-layer residual block for sparse 3D convolutions.
+
+    This block mirrors the basic residual building block used in the
+    VoxelNeXt backbone.  It consists of two 3x3x3 submanifold
+    convolutions with BatchNorm and ReLU, plus a residual connection.
+    """
+
+    expansion = 1
+
+    def __init__(self,
+                 inplanes: int,
+                 planes: int,
+                 stride: int = 1,
+                 norm_fn: nn.Module = None,
+                 downsample: SparseSequential | None = None,
+                 indice_key: str | None = None):
+        super().__init__()
+        assert norm_fn is not None, "norm_fn must be provided to build normalization layers."
+        bias = False
+        self.conv1 = SubMConv3d(
+            inplanes, planes, kernel_size=3, stride=stride, padding=1, bias=bias, indice_key=indice_key
+        )
+        self.bn1 = norm_fn(planes)
+        self.relu = nn.ReLU()
+        self.conv2 = SubMConv3d(
+            planes, planes, kernel_size=3, stride=stride, padding=1, bias=bias, indice_key=indice_key
+        )
+        self.bn2 = norm_fn(planes)
+        self.downsample = downsample
+        self.stride = stride
+
+    def forward(self, x: SparseConvTensor) -> SparseConvTensor:
+        identity = x
+
+        out = self.conv1(x)
+        out = replace_feature(out, self.bn1(out.features))
+        out = replace_feature(out, self.relu(out.features))
+
+        out = self.conv2(out)
+        out = replace_feature(out, self.bn2(out.features))
+
+        if self.downsample is not None:
+            identity = self.downsample(x)
+
+        out = replace_feature(out, out.features + identity.features)
+        out = replace_feature(out, self.relu(out.features))
+        return out
+
+
+class VoxelResBackBone8xVoxelNeXt(nn.Module):
+    """VoxelNeXt sparse convolution backbone with six downsampling stages.
+
+    The network takes sparse voxel features and coordinates and produces
+    a sparse BEV feature map.  It follows the original design used in
+    the VoxelNeXt paper: a sequence of six sparse convolutional blocks
+    with residual connections, culminating in a 2D sparse convolution to
+    produce the BEV representation.  Additional information such as
+    multi-scale features and strides is stored in the returned
+    ``batch_dict`` for potential downstream use.
+    """
+
+    def __init__(self,
+                 model_cfg: Dict[str, Any],
+                 input_channels: int,
+                 grid_size: list[int],
+                 **kwargs: Any) -> None:
+        super().__init__()
+        self.model_cfg = model_cfg
+        # default normalization: BatchNorm1d with small eps and momentum
+        norm_fn = partial(nn.BatchNorm1d, eps=1e-3, momentum=0.01)
+
+        # configuration values with defaults matching the official repo
+        spconv_kernel_sizes = model_cfg.get('SPCONV_KERNEL_SIZES', [3, 3, 3, 3])
+        channels = model_cfg.get('CHANNELS', [16, 32, 64, 128, 128])
+        out_channel = model_cfg.get('OUT_CHANNEL', 128)
+
+        # compute sparse spatial shape (Z, Y, X).  spconv expects
+        # [depth, height, width] = grid_size[::-1]
+        # The `+ [1, 0, 0]` is retained from the original implementation to
+        # provide a bias for the coordinate system; see the VoxelNeXt source.
+        self.sparse_shape = grid_size[::-1] + [1, 0, 0]
+
+        # input convolution
+        self.conv_input = SparseSequential(
+            SubMConv3d(input_channels, channels[0], 3, padding=1, bias=False, indice_key='subm1'),
+            norm_fn(channels[0]),
+            nn.ReLU(),
+        )
+
+        # define helper for building post-activation blocks
+        block = post_act_block
+
+        # residual blocks at different scales
+        self.conv1 = SparseSequential(
+            SparseBasicBlock(channels[0], channels[0], norm_fn=norm_fn, indice_key='res1'),
+            SparseBasicBlock(channels[0], channels[0], norm_fn=norm_fn, indice_key='res1'),
+        )
+
+        # strided conv2: downsample by 2
+        self.conv2 = SparseSequential(
+            block(channels[0], channels[1], spconv_kernel_sizes[0], norm_fn=norm_fn,
+                  stride=2, padding=int(spconv_kernel_sizes[0] // 2), indice_key='spconv2', conv_type='spconv'),
+            SparseBasicBlock(channels[1], channels[1], norm_fn=norm_fn, indice_key='res2'),
+            SparseBasicBlock(channels[1], channels[1], norm_fn=norm_fn, indice_key='res2'),
+        )
+
+        # conv3: downsample by 2 again
+        self.conv3 = SparseSequential(
+            block(channels[1], channels[2], spconv_kernel_sizes[1], norm_fn=norm_fn,
+                  stride=2, padding=int(spconv_kernel_sizes[1] // 2), indice_key='spconv3', conv_type='spconv'),
+            SparseBasicBlock(channels[2], channels[2], norm_fn=norm_fn, indice_key='res3'),
+            SparseBasicBlock(channels[2], channels[2], norm_fn=norm_fn, indice_key='res3'),
+        )
+
+        # conv4
+        self.conv4 = SparseSequential(
+            block(channels[2], channels[3], spconv_kernel_sizes[2], norm_fn=norm_fn,
+                  stride=2, padding=int(spconv_kernel_sizes[2] // 2), indice_key='spconv4', conv_type='spconv'),
+            SparseBasicBlock(channels[3], channels[3], norm_fn=norm_fn, indice_key='res4'),
+            SparseBasicBlock(channels[3], channels[3], norm_fn=norm_fn, indice_key='res4'),
+        )
+
+        # conv5
+        self.conv5 = SparseSequential(
+            block(channels[3], channels[4], spconv_kernel_sizes[3], norm_fn=norm_fn,
+                  stride=2, padding=int(spconv_kernel_sizes[3] // 2), indice_key='spconv5', conv_type='spconv'),
+            SparseBasicBlock(channels[4], channels[4], norm_fn=norm_fn, indice_key='res5'),
+            SparseBasicBlock(channels[4], channels[4], norm_fn=norm_fn, indice_key='res5'),
+        )
+
+        # conv6 (extra layer used by VoxelNeXt; same kernel as conv5)
+        self.conv6 = SparseSequential(
+            block(channels[4], channels[4], spconv_kernel_sizes[3], norm_fn=norm_fn,
+                  stride=2, padding=int(spconv_kernel_sizes[3] // 2), indice_key='spconv6', conv_type='spconv'),
+            SparseBasicBlock(channels[4], channels[4], norm_fn=norm_fn, indice_key='res6'),
+            SparseBasicBlock(channels[4], channels[4], norm_fn=norm_fn, indice_key='res6'),
+        )
+
+        # BEV output convolution: convert from 3D sparse conv to 2D
+        self.conv_out = SparseSequential(
+            # maps from conv4 channels to out_channel using a 3x3 kernel
+            # after concatenating features from deeper layers in forward()
+            SparseConv2d(channels[3], out_channel, 3, stride=1, padding=1, bias=False, indice_key='spconv_down2'),
+            norm_fn(out_channel),
+            nn.ReLU(),
+        )
+
+        # optional shared convolution: refine BEV features
+        self.shared_conv = SparseSequential(
+            SubMConv2d(out_channel, out_channel, 3, stride=1, padding=1, bias=True),
+            nn.BatchNorm1d(out_channel),
+            nn.ReLU(True),
+        )
+
+        # track output channels and intermediate scales for convenience
+        self.num_point_features = out_channel
+        self.backbone_channels = {
+            'x_conv1': channels[0],
+            'x_conv2': channels[1],
+            'x_conv3': channels[2],
+            'x_conv4': channels[3]
+        }
+
+    def bev_out(self, x_conv: SparseConvTensor) -> SparseConvTensor:
+        """Collapse the z-dimension of a sparse tensor to produce a BEV tensor.
+
+        This method aggregates features across the depth dimension and
+        collapses the indices accordingly.  It follows the logic of the
+        original VoxelNeXt implementation, ensuring that multiple points
+        mapping to the same BEV cell have their features accumulated.
+        """
+        features_cat = x_conv.features
+        # discard z index: keep batch, y, x coordinates
+        indices_cat = x_conv.indices[:, [0, 2, 3]]
+        spatial_shape = x_conv.spatial_shape[1:]  # remove depth dimension
+
+        # aggregate points that fall into the same BEV cell by summing their features
+        indices_unique, inv = torch.unique(indices_cat, dim=0, return_inverse=True)
+        features_unique = features_cat.new_zeros((indices_unique.shape[0], features_cat.shape[1]))
+        features_unique.index_add_(0, inv, features_cat)
+
+        x_out = SparseConvTensor(
+            features=features_unique,
+            indices=indices_unique,
+            spatial_shape=spatial_shape,
+            batch_size=x_conv.batch_size
+        )
+        return x_out
+
+    def forward(self, batch_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Forward pass through the sparse backbone.
+
+        ``batch_dict`` must contain the keys ``voxel_features``,
+        ``voxel_coords`` and ``batch_size``.  Features and coordinates
+        should be torch tensors and compatible with spconv.
+
+        After processing, the dictionary is augmented with the keys
+        ``encoded_spconv_tensor``, ``encoded_spconv_tensor_stride``,
+        ``multi_scale_3d_features`` and ``multi_scale_3d_strides``.
+
+        Returns the updated dictionary.
+        """
+        voxel_features = batch_dict['voxel_features']
+        voxel_coords = batch_dict['voxel_coords']
+        batch_size = batch_dict['batch_size']
+
+        # construct initial sparse tensor
+        input_sp_tensor = SparseConvTensor(
+            features=voxel_features,
+            indices=voxel_coords.int(),
+            spatial_shape=self.sparse_shape,
+            batch_size=batch_size
+        )
+
+        x = self.conv_input(input_sp_tensor)
+
+        # sequentially apply blocks
+        x_conv1 = self.conv1(x)
+        x_conv2 = self.conv2(x_conv1)
+        x_conv3 = self.conv3(x_conv2)
+        x_conv4 = self.conv4(x_conv3)
+        x_conv5 = self.conv5(x_conv4)
+        x_conv6 = self.conv6(x_conv5)
+
+        # upsample conv5 and conv6 features to match conv4 resolution
+        # This is equivalent to concatenating multi-scale features as
+        # performed in the official implementation.
+        # scale conv5 indices: multiply spatial coordinates by 2
+        x_conv5 = x_conv5
+        x_conv6 = x_conv6
+        # update indices for conv5 and conv6 to align with conv4
+        # Only update the spatial dimensions (z,y,x) parts
+        if x_conv5.indices.numel() > 0:
+            x_conv5 = replace_feature(x_conv5, x_conv5.features)
+            x_conv5.indices[:, 1:] *= 2
+        if x_conv6.indices.numel() > 0:
+            x_conv6 = replace_feature(x_conv6, x_conv6.features)
+            x_conv6.indices[:, 1:] *= 4
+
+        # concatenate features and indices
+        x_conv4 = x_conv4.replace_feature(torch.cat([x_conv4.features, x_conv5.features, x_conv6.features]))
+        x_conv4.indices = torch.cat([x_conv4.indices, x_conv5.indices, x_conv6.indices])
+
+        # collapse z dimension to BEV and apply 2D convolutions
+        out = self.bev_out(x_conv4)
+        out = self.conv_out(out)
+        out = self.shared_conv(out)
+
+        # update batch_dict with outputs and intermediate tensors
+        batch_dict.update({
+            'encoded_spconv_tensor': out,
+            'encoded_spconv_tensor_stride': 8  # stride of 8 relative to the input
+        })
+        batch_dict.update({
+            'multi_scale_3d_features': {
+                'x_conv1': x_conv1,
+                'x_conv2': x_conv2,
+                'x_conv3': x_conv3,
+                'x_conv4': x_conv4,
+            }
+        })
+        batch_dict.update({
+            'multi_scale_3d_strides': {
+                'x_conv1': 1,
+                'x_conv2': 2,
+                'x_conv3': 4,
+                'x_conv4': 8,
+            }
+        })
+        return batch_dict

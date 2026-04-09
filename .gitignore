@@ -1,0 +1,28 @@
+# TensorBoard Events Dateien
+events.out.tfevents.*
+
+# Trainings-Output-Dateien
+*.out
+
+# Checkpoints / Modelle
+#/model_checkpoints/*
+*.pth
+
+
+# WandB Logs und Ordner
+wandb/
+# Python build artifacts
+__pycache__/
+*.pyc
+*.so
+*.o
+*.egg-info
+
+# Build directories
+nets/ops/build/
+
+#eval results
+logs_eval/
+
+# keys 
+ssh_key*
